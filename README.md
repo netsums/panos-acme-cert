@@ -165,9 +165,6 @@ acme.sh --set-default-ca --server letsencrypt
 chmod 700 ~/.acme.sh
 ```
 
-No email needed. Let's Encrypt doesn't require one and stopped sending expiry
-emails in 2025. Step 7 sets up alerts you control instead.
-
 ## Step 3: DNS delegation and issuing
 
 In your **real** DNS zone, one CNAME per name on the cert:
