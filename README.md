@@ -384,6 +384,44 @@ clients will reject the certificate.
 
 ---
 
+## Shorter certificate lifetimes (47 days by 2029)
+
+Public TLS certificates are getting shorter: 200 days maximum since March
+2026, 100 days from March 2027, 47 days from March 2029 (CA/Browser Forum
+ballot SC-081). Let's Encrypt is ahead of that: its default drops from 90 to
+64 days on 10 February 2027, and to 45 days on 16 February 2028.
+
+**You don't need to change anything.** acme.sh asks Let's Encrypt when to
+renew each certificate (ARI) and renews inside that window, so the schedule
+follows the lifetime on its own. What changes is how often the firewall gets
+an import and commit: with 45-day certs, about once a month.
+
+When is the next renewal planned? See the `Renew` column:
+
+```bash
+acme.sh --list
+```
+
+**Optional: pick the lifetime.** With Let's Encrypt you can't request a number
+of days. You pick a profile by adding it to the `--issue` line in step 3:
+
+| Option on `--issue` | Lifetime |
+|---|---|
+| *(none)* | Let's Encrypt default: 90 days, 64 from Feb 2027, 45 from Feb 2028 |
+| `--cert-profile tlsserver` | 45 days now, to test the short lifetime before it's the default |
+
+**Optional: renew a fixed number of days before expiry.** Add e.g.
+`--days -15` to the `--issue` line to renew 15 days before the certificate
+expires. Let's Encrypt can still ask for an earlier renewal when it needs to
+(for example before revoking certificates). Most people should leave this out:
+the default already renews with plenty of margin.
+
+**Already issued?** Run your step 3 `--issue` block again with the new option
+and `--force` added. That issues a new certificate now. Then deploy it with
+the step 7 deploy command. acme.sh saves the options for all future renewals.
+
+---
+
 ## Where the credentials live
 
 - **Firewall password:** used once in step 5a, never stored.
