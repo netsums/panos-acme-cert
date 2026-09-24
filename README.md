@@ -36,7 +36,7 @@ Print this, or tick it off as you follow the steps below.
 
 **Firewall**
 - [ ] Admin Role `acme-deploy`: XML API **Import** + **Commit** only, everything else off
-- [ ] Administrator `acme` with that role and a long random password
+- [ ] Administrator (e.g. `acme`) with that role and a long random password
 - [ ] acme.sh box's IP added to mgmt *Permitted IP Addresses*, if list not empty
 - [ ] Mgmt reachable from the box by an FQDN (DNS or `/etc/hosts`)
 
@@ -67,10 +67,12 @@ Print this, or tick it off as you follow the steps below.
 ## Step 0: Set your names (paste in every new shell)
 
 Everything below uses these variables, so the remaining blocks paste as-is.
+The commands assume **bash** (type `bash` first if your shell is zsh).
 
 ```bash
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
 FW=fw-mgmt.example.com        # mgmt FQDN, also put on the cert (see step 3)
+FWUSER=acme                   # restricted admin you create in step 1
 BURNER=burner-domain.net      # throwaway domain for DNS validation
 ```
 
@@ -90,11 +92,12 @@ New roles start with most permissions *enabled*. Check every tab.
 > Leave **Operational Requests** off. It would let a stolen key run
 > `show config running`. Only Panorama pushing to a template stack needs it.
 
-**Device > Administrators > Add** → `acme`, Role Based → `acme-deploy`, long
-random password (you'll type it once, below).
+**Device > Administrators > Add** → the name you set as `$FWUSER` (e.g.
+`acme`), Role Based → `acme-deploy`, long random password (you'll type it
+once, in step 5).
 
-**Device > Setup > Interfaces > Management** → add the acme.sh box's IP to
-*Permitted IP Addresses*. Commit.
+**Device > Setup > Interfaces > Management** → if *Permitted IP Addresses*
+has entries, add the acme.sh box's IP (an empty list allows any IP). Commit.
 
 ## Step 2: acme.sh box — install
 
@@ -102,11 +105,14 @@ Use a dedicated user, not root. Install from git so you can read what you run:
 
 ```bash
 git clone --depth 1 https://github.com/acmesh-official/acme.sh.git
-cd acme.sh && ./acme.sh --install -m you@example.com && cd .. && rm -rf acme.sh
+cd acme.sh && ./acme.sh --install && cd .. && rm -rf acme.sh
 exec "$SHELL"                                    # reload so 'acme.sh' is on PATH
 acme.sh --set-default-ca --server letsencrypt
 chmod 700 ~/.acme.sh
 ```
+
+No email needed. Let's Encrypt doesn't require one and stopped sending expiry
+emails in 2025. Step 7 sets up alerts you control instead.
 
 ## Step 3: DNS delegation and issuing
 
@@ -135,14 +141,16 @@ acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
 unset CF_Token
 ```
 
-acme.sh saves the token for renewals. That's why it must only be able to edit
-the burner zone.
+`read -s` puts the token in the `CF_Token` variable without showing it on
+screen or saving it in shell history. `export` hands it to acme.sh, whose
+Cloudflare module reads exactly that variable name. acme.sh then saves the
+token for renewals (see [Where the credentials live](#where-the-credentials-live)),
+which is why it must only be able to edit the burner zone.
 
-## Step 4: API key
+## Step 4: Check you're really talking to your firewall
 
-**4a. Check you're really talking to your firewall.** Mgmt is probably still
-on its self-signed cert, so TLS can't verify it for you. Save the cert it
-presents and look at its fingerprint:
+Mgmt is probably still on its self-signed cert, so TLS can't verify it for
+you. Save the cert it presents and look at its fingerprint:
 
 ```bash
 echo | openssl s_client -connect "$FW:443" -servername "$FW" 2>/dev/null \
@@ -155,40 +163,44 @@ Management > Certificates**, export the cert used by mgmt, then run
 `openssl x509 -in <exported file> -noout -fingerprint -sha256` on it. **Only
 continue if they match.**
 
-**4b. Generate the key.** The password is read hidden and handed to curl on
-stdin, so it isn't in shell history or `ps`. `--pinnedpubkey` makes curl
-refuse to send anything unless the firewall presents the key you just checked.
+## Step 5: API key and first deploy
+
+**5a. Generate the API key.** The password is read hidden and handed to curl
+on stdin, so it isn't in shell history or `ps`. `--pinnedpubkey` makes curl
+refuse to send anything unless the firewall presents the key you checked in
+step 4. The API key goes straight into a variable and is never shown, so
+there's nothing to copy.
 
 ```bash
 PIN="sha256//$(openssl x509 -in fw-mgmt.pem -pubkey -noout \
   | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl base64)"
 
-read -rsp 'Password for acme: ' P; echo
-printf '%s' "$P" | curl -sS -k --pinnedpubkey "$PIN" -X POST "https://$FW/api/?type=keygen" \
-    --data-urlencode 'user=acme' --data-urlencode 'password@-'; echo
+read -rsp "Password for $FWUSER: " P; echo
+RESP="$(printf '%s' "$P" | curl -sS -k --pinnedpubkey "$PIN" -X POST "https://$FW/api/?type=keygen" \
+    --data-urlencode "user=$FWUSER" --data-urlencode 'password@-')"
 unset P
+PANOS_KEY="$(sed -n 's:.*<key>\(.*\)</key>.*:\1:p' <<<"$RESP")"
+if [ -n "$PANOS_KEY" ]; then echo "API key OK"; else echo "Keygen FAILED: $RESP"; fi
+unset RESP
 ```
 
-Output: `<response status = 'success'><result><key>LUFRPT…</key></result></response>`.
-Copy the key.
+Continue only if it says `API key OK`.
 
-## Step 5: First deploy
+**5b. First deploy**, in the same shell:
 
 ```bash
-read -rsp 'API key: ' PANOS_KEY; echo
-export PANOS_HOST="$FW" PANOS_USER=acme PANOS_KEY
-
 acme.sh --list    # KeyLength "ec-256" = ECDSA → keep --ecc. "2048" → remove --ecc
+export PANOS_HOST="$FW" PANOS_USER="$FWUSER" PANOS_KEY
 acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc --insecure
 unset PANOS_KEY
 ```
 
 `--insecure` is needed **this once** because mgmt is still self-signed (you
-checked its identity in 4a). It is not saved. acme.sh stores host, user and key
-for renewals.
+checked its identity in step 4). It is not saved. acme.sh stores host, user
+and key for renewals.
 
 The cert appears under **Device > Certificate Management > Certificates**,
-named after `$CERT`. The hook commits only the `acme` admin's changes.
+named after `$CERT`. The hook commits only the `$FWUSER` admin's changes.
 
 ## Step 6: Firewall — bind the cert (once)
 
@@ -234,7 +246,7 @@ echo | openssl s_client -connect "$CERT:443" -servername "$CERT" 2>/dev/null \
 
 ## Where the credentials live
 
-- **Firewall password:** used once in step 4, never stored.
+- **Firewall password:** used once in step 5a, never stored.
 - **API key:** in `~/.acme.sh/<domain>_ecc/<domain>.conf` (no `_ecc` for RSA),
   **base64-encoded, not encrypted.** Anyone who can read that file can use it.
 - **Burner DNS token:** in `~/.acme.sh/account.conf`. It can only change the
@@ -247,7 +259,9 @@ read your config.
 Keep it small: a dedicated box or user, `chmod 700 ~/.acme.sh`, mgmt Permitted
 IPs limited to that box. If you set an API key lifetime (Device > Setup >
 Management > Authentication Settings), renewals fail when the key expires.
-Repeat step 4 before then.
+Before then, repeat 5a without `-k --pinnedpubkey "$PIN"` (mgmt has a trusted
+cert by now), then the deploy from step 7 in the same shell, with
+`export PANOS_HOST="$FW" PANOS_USER="$FWUSER" PANOS_KEY` first.
 
 ## Panorama
 
@@ -267,7 +281,7 @@ Pushing a template stack needs **Operational Requests** on the role.
 |---|---|
 | `dig` shows no CNAME | Record missing, or created in the burner zone instead of the real one |
 | Issue fails with DNS error | Token can't edit the burner zone, or the CNAME target is wrong |
-| Keygen: `(90) public key does not match` | The firewall's key changed, or something is intercepting. Redo 4a |
+| Keygen: `(90) public key does not match` | The firewall's key changed, or something is intercepting. Redo step 4 |
 | Keygen returns error | Wrong password, or the role has no XML API access |
 | Import fails | Role missing **Import** |
 | Deploy fails: key/cert file not found | ECDSA cert without `--ecc` (or RSA with it). Check `acme.sh --list` |
