@@ -79,17 +79,39 @@ Pick one:
 | | Mgmt cert | `$FW` is | Extra work |
 |---|---|---|---|
 | **(A)** | This Let's Encrypt cert | A public name, e.g. `fw-mgmt.example.com` | One more CNAME; bind the cert to mgmt in step 6 |
-| **(B)** | From your internal PKI | An internal name, e.g. `fw01.corp.local` | Trust your internal root CA on the box (step 3b) |
+| **(B)** | From your internal PKI | An internal name, e.g. `fw01.corp.local` | The box must trust your internal root CA (see below) |
 
 - **No internal PKI but don't want a public name for mgmt?** Use (B) with the
   firewall as its own CA: **Device > Certificate Management > Certificates >
   Generate**, tick *Certificate Authority*, then generate a mgmt cert signed
   by it with the mgmt FQDN as Common Name **and** as a *Host Name* attribute.
-  Bind it to mgmt, and trust the firewall's CA cert on the box in step 3b.
+  Bind it to mgmt, and trust the firewall's CA cert on the box as below.
 - **Leaving mgmt on its default self-signed cert** works for the first
   deploy only. Every renewal fails. That's not hands-off.
 - **Panorama:** the cert is imported into a template, not onto Panorama
   itself, so Panorama's own mgmt can't use it. Use (B) for Panorama.
+
+**(B) prerequisite:** issuing the internal mgmt cert is up to your PKI and not
+part of this guide, but the acme.sh box must trust the root CA that signed it.
+Managed servers often do already. Step 4 tells you: `TRUSTED` means you're set.
+
+<details>
+<summary>Box doesn't trust your internal CA yet? (click)</summary>
+
+From your admin account (`acmesh` has no sudo), with the root CA saved as PEM
+in `corp-root-ca.crt`:
+
+```bash
+# Debian / Ubuntu
+sudo cp corp-root-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
+# RHEL / Rocky / Alma
+sudo cp corp-root-ca.crt /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust
+```
+
+Don't use acme.sh's `--ca-bundle` instead. It *replaces* the trusted CAs for
+all acme.sh traffic, so talking to Let's Encrypt breaks.
+
+</details>
 
 ---
 
@@ -182,14 +204,21 @@ dig +short CNAME "_acme-challenge.$FW"     # (A) only
 ```
 
 Issue (Cloudflare shown; any [acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works).
-Paste the first line, then **one** of the two `--issue` lines, then `unset`:
+Paste **one** of the two blocks.
+
+**(A)** GlobalProtect name + mgmt name on the cert:
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
+unset CF_Token
+```
 
-acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"   # (A)
-acme.sh --issue --dns dns_cf -d "$CERT"          --challenge-alias "$BURNER"   # (B)
+**(B)** GlobalProtect name only:
 
+```bash
+read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+acme.sh --issue --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
 unset CF_Token
 ```
 
@@ -199,35 +228,28 @@ Cloudflare module reads exactly that variable name. acme.sh then saves the
 token for renewals (see [Where the credentials live](#where-the-credentials-live)),
 which is why it must only be able to edit the burner zone.
 
-### Step 3b (B only): trust your internal root CA
-
-Get the root CA cert that signed the mgmt cert (PEM, saved as `corp-root-ca.crt`)
-and add it to the box's system trust store, which acme.sh uses. Run this
-from your **admin account** in a second terminal (`acmesh` has no sudo):
-
-```bash
-# Debian / Ubuntu
-sudo cp corp-root-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
-# RHEL / Rocky / Alma
-sudo cp corp-root-ca.crt /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust
-```
-
-Don't use acme.sh's `--ca-bundle` for this instead. It *replaces* the trusted
-CAs for all acme.sh traffic, so talking to Let's Encrypt breaks.
-
 ## Step 4: Check you're really talking to your firewall
 
 ```bash
-if curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" 2>/dev/null; then
+if ERR="$(curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" 2>&1)"; then
   echo "TRUSTED: mgmt cert verifies. Skip the rest of step 4."
   TLS=(); INSECURE=()
 else
-  echo "NOT TRUSTED: do the fingerprint check below."
+  echo "NOT TRUSTED: ${ERR%%$'\n'*}"
 fi
 ```
 
-**If not trusted** (usual for (A) on a first run, mgmt is still
-self-signed), save the cert mgmt presents and look at its fingerprint:
+Read the reason it prints:
+
+| Reason contains | Meaning | Next |
+|---|---|---|
+| `(60) SSL certificate problem` | Box can't verify the mgmt cert. Normal for (A) on a first run | Fingerprint check below |
+| `(60) … no alternative certificate subject name matches` | Cert is valid, but `$FW` isn't a name on it | Fix `$FW` or the mgmt cert. (B): must match the internal cert |
+| `(6) Could not resolve host` | `$FW` doesn't resolve on the box | DNS or `/etc/hosts` |
+| `(7) Failed to connect` / `(28) timed out` | Can't reach mgmt on 443 | Permitted IPs, routing, host firewall |
+
+**If it's a certificate problem** (usual for (A) on a first run, mgmt is
+still self-signed), save the cert mgmt presents and look at its fingerprint:
 
 ```bash
 echo | openssl s_client -connect "$FW:443" -servername "$FW" 2>/dev/null \
@@ -365,13 +387,13 @@ Before then, repeat 0b, 0c, 4 (it should say `TRUSTED` by now), 5a and 5b.
 | `dig` shows no CNAME | Record missing, or created in the burner zone instead of the real one |
 | Issue fails with DNS error | Token can't edit the burner zone, or the CNAME target is wrong |
 | Step 4: `unable to load certificate` | Box can't reach mgmt on 443: Permitted IPs, routing, or wrong `$FW` |
-| (B) Step 4 says NOT TRUSTED | Root CA not in the trust store (step 3b), or `$FW` isn't a name on the mgmt cert |
+| (B) Step 4 says NOT TRUSTED | Root CA not in the box's trust store ([see (B) prerequisite](#choose-how-the-box-will-trust-mgmt)), or `$FW` isn't a name on the mgmt cert |
 | Keygen: `(90) public key does not match` | The firewall's key changed, or something is intercepting. Redo step 4 |
 | Keygen returns error | Wrong password, or the role has no XML API access |
 | Import fails | Role missing **Import** |
 | Deploy fails: key/cert file not found | ECDSA cert without `--ecc` (or RSA with it). Check `acme.sh --list` |
 | Commit fails | Role missing **Commit**, or another admin holds a config lock |
-| Step 7 deploy fails with a TLS error | (A) Mgmt isn't presenting the new cert yet, or `$FW` isn't a name on it: redo step 6. (B) See step 3b |
+| Step 7 deploy fails with a TLS error | (A) Mgmt isn't presenting the new cert yet, or `$FW` isn't a name on it: redo step 6. (B) The box no longer trusts the mgmt cert: see the (B) prerequisite |
 | Users still see the old cert | The SSL/TLS Service Profile points at a different cert object |
 
 ## License
