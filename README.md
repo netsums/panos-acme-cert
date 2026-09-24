@@ -340,10 +340,14 @@ clients don't fail with "untrusted certificate".
 
 ## Step 7: Make renewals hands-off
 
-**Deploy again, without `--insecure`.** If this works, renewals will too:
+**Deploy again, without `--insecure`.** For (A), only after step 6 is
+committed: mgmt must present the new cert first. The `curl` check in front
+stops with the reason if it doesn't yet. If the deploy works, renewals will
+too:
 
 ```bash
-acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
+curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" \
+  && acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
 ```
 
 **Get told about failures.** Notifications at the default level cover errors
