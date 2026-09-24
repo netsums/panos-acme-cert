@@ -35,6 +35,9 @@ uses it picks up the new cert.
 Print this, or tick it off as you follow the steps below. **(A)** / **(B)**
 marks items that depend on your mgmt choice ([see below](#choose-how-the-box-will-trust-mgmt)).
 
+**Box prep**
+- [ ] Tools installed, `acmesh` user created (no password, no sudo)
+
 **Firewall**
 - [ ] Admin Role `acme-deploy`: XML API **Import** + **Commit** only, everything else off
 - [ ] Administrator (e.g. `acme`) with that role and a long random password
@@ -47,7 +50,6 @@ marks items that depend on your mgmt choice ([see below](#choose-how-the-box-wil
 - [ ] `_acme-challenge` CNAME for **each** name on the cert → `_acme-challenge.<burner>`
 
 **acme.sh box**
-- [ ] Tools installed, `acmesh` user created (no password, no sudo)
 - [ ] acme.sh installed as `acmesh`, default CA set to Let's Encrypt
 - [ ] Certificate issued: GlobalProtect name, **(A)** + mgmt FQDN
 - [ ] **(B)** Internal root CA trusted by the box
@@ -91,11 +93,32 @@ Pick one:
 
 ---
 
-## Step 0: Set your names
+## Step 0: Prepare the box and set your names
 
-Everything below uses these variables, so the remaining blocks paste as-is.
-Fill them in now, and paste them **as the `acmesh` user** (created in step 2)
-after step 2b and in every new shell. The commands assume **bash**.
+**0a. Tools and user**, from your normal admin account (needs sudo). This
+installs the tools and creates `acmesh`, a user that runs acme.sh and nothing
+else. It has no password (nobody can log in as it directly) and no sudo. It's
+called `acmesh`, not `acme`, so you don't mix it up with the firewall admin.
+
+```bash
+# Debian / Ubuntu
+sudo apt update && sudo apt install -y git curl openssl cron dnsutils
+# RHEL / Rocky / Alma
+sudo dnf install -y git curl openssl cronie bind-utils && sudo systemctl enable --now crond
+
+sudo useradd --create-home --shell /bin/bash acmesh
+sudo chmod 700 /home/acmesh
+```
+
+**0b. Switch to it.** Every later command runs as `acmesh` unless it says
+otherwise. Keep this shell open while you do step 1 in the firewall GUI.
+
+```bash
+sudo -iu acmesh
+```
+
+**0c. Set your names.** Everything below uses these variables, so the
+remaining blocks paste as-is. If you open a new shell later, repeat 0b and 0c.
 
 ```bash
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
@@ -130,33 +153,9 @@ has entries, add the acme.sh box's IP (an empty list allows any IP). Commit.
 On **Panorama**, create the role (type *Panorama*) and admin the same way,
 under **Panorama > Admin Roles** and **Panorama > Administrators**.
 
-## Step 2: acme.sh box — user and install
+## Step 2: Install acme.sh
 
-**2a. Prepare the box**, from your normal admin account (needs sudo). This
-installs the tools and creates `acmesh`, a user that runs acme.sh and nothing
-else. It has no password (nobody can log in as it directly) and no sudo. It's
-called `acmesh`, not `acme`, so you don't mix it up with the firewall admin.
-
-```bash
-# Debian / Ubuntu
-sudo apt update && sudo apt install -y git curl openssl cron dnsutils
-# RHEL / Rocky / Alma
-sudo dnf install -y git curl openssl cronie bind-utils && sudo systemctl enable --now crond
-
-sudo useradd --create-home --shell /bin/bash acmesh
-sudo chmod 700 /home/acmesh
-```
-
-**2b. Switch to it.** Every later step runs as `acmesh` unless it says
-otherwise:
-
-```bash
-sudo -iu acmesh
-```
-
-Now paste the step 0 variables.
-
-**2c. Install acme.sh** from git, so you can read what you run:
+As `acmesh`, from git, so you can read what you run:
 
 ```bash
 git clone --depth 1 https://github.com/acmesh-official/acme.sh.git
@@ -360,7 +359,7 @@ read your config.
 Keep it small: a dedicated box, the `acmesh` user, `chmod 700 ~/.acme.sh`, mgmt Permitted
 IPs limited to that box. If you set an API key lifetime (Device > Setup >
 Management > Authentication Settings), renewals fail when the key expires.
-Before then, repeat steps 0, 4 (it should say `TRUSTED` by now), 5a and 5b.
+Before then, repeat 0b, 0c, 4 (it should say `TRUSTED` by now), 5a and 5b.
 
 ## Troubleshooting
 
