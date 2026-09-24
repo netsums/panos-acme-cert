@@ -37,7 +37,7 @@ Print this, or tick it off as you follow the steps below.
 **Firewall**
 - [ ] Admin Role `acme-deploy`: XML API **Import** + **Commit** only, everything else off
 - [ ] Administrator `acme` with that role and a long random password
-- [ ] acme.sh box's IP added to mgmt *Permitted IP Addresses*
+- [ ] acme.sh box's IP added to mgmt *Permitted IP Addresses*, if list not empty
 - [ ] Mgmt reachable from the box by an FQDN (DNS or `/etc/hosts`)
 
 **DNS**
