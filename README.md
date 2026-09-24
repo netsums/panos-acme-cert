@@ -1,14 +1,15 @@
 # panos-acme-cert
 
-Auto-renew PAN-OS certificates (GlobalProtect portal/gateway, mgmt, captive
-portal, …) with Let's Encrypt via [acme.sh](https://github.com/acmesh-official/acme.sh).
-DNS-01 validation through a delegated challenge domain, deploy with a
-restricted admin's API key. No password stored anywhere.
+Free, auto-renewing Let's Encrypt certificates for Palo Alto NGFW (GlobalProtect
+portal/gateway, mgmt, captive portal, …) using
+[acme.sh](https://github.com/acmesh-official/acme.sh).
 
-**The deploy itself is done by acme.sh's own, upstream `panos` hook.** This repo
-adds a guide and an optional interactive helper around it. You can do
-everything by hand with the commands in [Option A](#option-a--by-hand-no-script)
-and never run code from this repo.
+- **No script from this repo to trust.** Every step is a command you can read
+  and paste. The firewall deploy is acme.sh's own upstream `panos` hook.
+- **No password stored.** The firewall only ever sees an API key from an
+  admin that can do nothing but Import and Commit.
+- **Your production DNS credentials never touch the box.** Validation goes
+  through a delegated throwaway domain.
 
 ---
 
@@ -17,119 +18,262 @@ and never run code from this repo.
 ```
 acme.sh (Linux box) ──DNS-01──▶ Let's Encrypt
         │                         ▲
-        │                         └─ _acme-challenge.fw.example.com  CNAME ─▶ burner domain
-        │                                                            (only the burner's DNS API
-        │                                                             token lives on the box)
-        └──XML API (API key)──▶ PAN-OS mgmt: import cert + key, partial commit
+        │                         └─ _acme-challenge.vpn.example.com  CNAME ─▶ _acme-challenge.burner-domain.net
+        │                                                             (only the burner zone's DNS token
+        │                                                              lives on the box)
+        └──XML API (API key)──▶ PAN-OS: import cert + key, partial commit
 ```
 
-Every ~60 days acme.sh renews via cron and re-runs the deploy hook: import,
-commit, done.
+acme.sh renews by cron every ~60 days and re-runs the deploy: import, commit,
+done. The cert object keeps its name, so every SSL/TLS Service Profile that
+uses it picks up the new cert.
 
-## 1. Prerequisites on the firewall
+---
 
-1. **Admin Role** (Device > Admin Roles), *XML API* tab: enable only
-   **Import** and **Commit**. Web UI and REST API: all disabled. Command line:
-   None. (Panorama pushing to a template stack also needs **Operational
-   Requests**. Leave it off otherwise: it lets the key run
-   `show config running`.)
-2. **Administrator** `acme` using that role, with a long random password.
-3. **Mgmt access**: add the acme.sh box's IP to the mgmt interface's
-   *Permitted IP Addresses*.
-4. **Mgmt TLS** (important for unattended renewals): the box must trust the
-   mgmt certificate. If mgmt is still on its self-signed cert, the first deploy
-   can be forced, but **renewals will fail** until mgmt presents a publicly
-   trusted cert whose name matches `PANOS_HOST`. Easiest fix: issue a cert for
-   the mgmt FQDN too and bind it to the mgmt SSL/TLS Service Profile.
+## Checklist
 
-## 2. Issue the certificate (DNS delegation)
+Print this, or tick it off as you follow the steps below.
 
-Point the challenge record of your real domain at a throwaway domain whose DNS
-API you're happy to hand to a script:
+**Firewall**
+- [ ] Admin Role `acme-deploy`: XML API **Import** + **Commit** only, everything else off
+- [ ] Administrator `acme` with that role and a long random password
+- [ ] acme.sh box's IP added to mgmt *Permitted IP Addresses*
+- [ ] Mgmt reachable from the box by an FQDN (DNS or `/etc/hosts`)
 
-```
-_acme-challenge.fw.example.com.  CNAME  _acme-challenge.fw.burner-domain.net.
-```
+**DNS**
+- [ ] Throwaway ("burner") domain on a DNS provider acme.sh supports
+- [ ] API token scoped to the burner zone only
+- [ ] `_acme-challenge` CNAME for **each** name on the cert → `_acme-challenge.<burner>`
 
-Then issue on the acme.sh box (Cloudflare shown; any acme.sh DNS API works):
+**acme.sh box**
+- [ ] acme.sh installed as a dedicated, non-root user, default CA set to Let's Encrypt
+- [ ] Certificate issued (GlobalProtect name **+ mgmt FQDN**)
+- [ ] Mgmt certificate fingerprint verified before sending the password
+- [ ] API key generated, password discarded
+- [ ] First deploy done
+
+**Firewall, once**
+- [ ] Cert bound to the GlobalProtect portal/gateway SSL/TLS Service Profile
+- [ ] Cert bound to the mgmt SSL/TLS Service Profile (**renewals depend on this**)
+- [ ] Commit
+
+**Hands-off check**
+- [ ] Deploy works *without* `--insecure`
+- [ ] Renewal notifications go to a mailbox someone reads
+- [ ] Calendar reminder at 80 days in case everything else fails
+
+---
+
+## Step 0: Set your names (paste in every new shell)
+
+Everything below uses these variables, so the remaining blocks paste as-is.
 
 ```bash
-export CF_Token="<token scoped to the burner zone only>"
-acme.sh --issue --dns dns_cf -d fw.example.com \
-        --challenge-alias burner-domain.net --server letsencrypt
+CERT=vpn.example.com          # name your users connect to (GlobalProtect)
+FW=fw-mgmt.example.com        # mgmt FQDN, also put on the cert (see step 3)
+BURNER=burner-domain.net      # throwaway domain for DNS validation
 ```
 
-Your production DNS credentials never touch the box.
+## Step 1: Firewall — role and admin
 
-## 3. Deploy to the firewall
+**Device > Admin Roles > Add** → name `acme-deploy`
 
-### Option A — by hand, no script
+| Tab | Setting |
+|---|---|
+| Web UI | disable **everything** |
+| XML API | disable everything, then enable **Import** and **Commit** only |
+| Command Line | None |
+| REST API | disable everything |
+
+New roles start with most permissions *enabled*. Check every tab.
+
+> Leave **Operational Requests** off. It would let a stolen key run
+> `show config running`. Only Panorama pushing to a template stack needs it.
+
+**Device > Administrators > Add** → `acme`, Role Based → `acme-deploy`, long
+random password (you'll type it once, below).
+
+**Device > Setup > Interfaces > Management** → add the acme.sh box's IP to
+*Permitted IP Addresses*. Commit.
+
+## Step 2: acme.sh box — install
+
+Use a dedicated user, not root. Install from git so you can read what you run:
 
 ```bash
-FW=fw.example.com   # mgmt address
+git clone --depth 1 https://github.com/acmesh-official/acme.sh.git
+cd acme.sh && ./acme.sh --install -m you@example.com && cd .. && rm -rf acme.sh
+exec "$SHELL"                                    # reload so 'acme.sh' is on PATH
+acme.sh --set-default-ca --server letsencrypt
+chmod 700 ~/.acme.sh
+```
 
-# 1. Generate an API key. Password is read hidden and sent to curl on stdin,
-#    so it never appears in shell history or `ps`.
+## Step 3: DNS delegation and issuing
+
+Put **both** the GlobalProtect name and the mgmt FQDN on the cert. Binding it
+to mgmt later is what makes renewals work without `--insecure`.
+
+In your **real** DNS zone, one CNAME per name:
+
+```
+_acme-challenge.vpn.example.com.      CNAME  _acme-challenge.burner-domain.net.
+_acme-challenge.fw-mgmt.example.com.  CNAME  _acme-challenge.burner-domain.net.
+```
+
+Check them:
+
+```bash
+dig +short CNAME "_acme-challenge.$CERT"
+dig +short CNAME "_acme-challenge.$FW"
+```
+
+Issue (Cloudflare shown; any [acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works):
+
+```bash
+read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
+unset CF_Token
+```
+
+acme.sh saves the token for renewals. That's why it must only be able to edit
+the burner zone.
+
+## Step 4: API key
+
+**4a. Check you're really talking to your firewall.** Mgmt is probably still
+on its self-signed cert, so TLS can't verify it for you. Save the cert it
+presents and look at its fingerprint:
+
+```bash
+echo | openssl s_client -connect "$FW:443" -servername "$FW" 2>/dev/null \
+  | openssl x509 > fw-mgmt.pem
+openssl x509 -in fw-mgmt.pem -noout -subject -fingerprint -sha256
+```
+
+Compare it with the real one: on the firewall, **Device > Certificate
+Management > Certificates**, export the cert used by mgmt, then run
+`openssl x509 -in <exported file> -noout -fingerprint -sha256` on it. **Only
+continue if they match.**
+
+**4b. Generate the key.** The password is read hidden and handed to curl on
+stdin, so it isn't in shell history or `ps`. `--pinnedpubkey` makes curl
+refuse to send anything unless the firewall presents the key you just checked.
+
+```bash
+PIN="sha256//$(openssl x509 -in fw-mgmt.pem -pubkey -noout \
+  | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl base64)"
+
 read -rsp 'Password for acme: ' P; echo
-printf '%s' "$P" | curl -sS -X POST "https://$FW/api/?type=keygen" \
-    --data-urlencode 'user=acme' --data-urlencode 'password@-'
+printf '%s' "$P" | curl -sS -k --pinnedpubkey "$PIN" -X POST "https://$FW/api/?type=keygen" \
+    --data-urlencode 'user=acme' --data-urlencode 'password@-'; echo
 unset P
-# -> <response status = 'success'><result><key>LUFRPT...</key></result></response>
+```
 
-# 2. Hand host/user/key to acme.sh (key pasted hidden, not into history).
+Output: `<response status = 'success'><result><key>LUFRPT…</key></result></response>`.
+Copy the key.
+
+## Step 5: First deploy
+
+```bash
 read -rsp 'API key: ' PANOS_KEY; echo
 export PANOS_HOST="$FW" PANOS_USER=acme PANOS_KEY
 
-# 3. Deploy. Add --ecc if the cert is ECDSA (acme.sh default since v3).
-acme.sh --deploy -d fw.example.com --deploy-hook panos --ecc
+acme.sh --list    # KeyLength "ec-256" = ECDSA → keep --ecc. "2048" → remove --ecc
+acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc --insecure
 unset PANOS_KEY
 ```
 
-If mgmt is still self-signed, curl in step 1 needs `-k`. Only do that from a
-network path you trust, since the password goes to a host you haven't verified.
+`--insecure` is needed **this once** because mgmt is still self-signed (you
+checked its identity in 4a). It is not saved. acme.sh stores host, user and key
+for renewals.
 
-### Option B — the helper script
+The cert appears under **Device > Certificate Management > Certificates**,
+named after `$CERT`. The hook commits only the `acme` admin's changes.
+
+## Step 6: Firewall — bind the cert (once)
+
+- **GlobalProtect:** Device > Certificate Management > SSL/TLS Service Profile
+  → the profile used by the portal/gateway → Certificate = `vpn.example.com`
+  (or create a profile and select it in the portal and gateway).
+- **Mgmt:** create an SSL/TLS Service Profile with the same cert → **Device >
+  Setup > Management > General Settings** → SSL/TLS Service Profile.
+- Commit.
+
+Mgmt now presents a publicly trusted cert that matches `$FW`.
+
+## Step 7: Make renewals hands-off
+
+**Deploy again, without `--insecure`.** If this works, renewals will too:
 
 ```bash
-curl -fsSLO https://raw.githubusercontent.com/netsums/panos-acme-cert/<tag>/panos-acme-deploy.sh
-less panos-acme-deploy.sh          # read it; it's ~300 lines of bash
-bash panos-acme-deploy.sh
+acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
 ```
 
-It does what Option A does, with guard rails:
+**Get told about failures.** Notifications at the default level cover errors
+and successful renewals, so silence means something is wrong. SMTP example
+(other hooks: mail, Teams, Slack, Telegram, …):
 
-- checks the mgmt cert; if it isn't publicly trusted, shows the SHA-256
-  fingerprint, asks you to confirm it and **pins that public key** for every
-  request, and warns loudly if it changes on a later run
-- sends the password and key to curl **on stdin**, never as arguments
-- verifies the key works before touching acme.sh
-- matches the acme.sh cert exactly and adds `--ecc` automatically
-- talks to exactly one host, your mgmt address: `grep -nE 'curl|openssl s_client' panos-acme-deploy.sh`
+```bash
+export SMTP_FROM=acme@example.com SMTP_TO=you@example.com \
+       SMTP_HOST=smtp.example.com SMTP_SECURE=tls \
+       SMTP_USERNAME=acme@example.com
+read -rsp 'SMTP password: ' SMTP_PASSWORD; echo; export SMTP_PASSWORD
+acme.sh --set-notify --notify-hook smtp
+unset SMTP_PASSWORD
+```
 
-## Where the credential lives, honestly
+**Check the cron job and what the firewall serves:**
 
-- The password is used once to mint the API key, then discarded.
-- acme.sh stores `PANOS_HOST`, `PANOS_USER` and `PANOS_KEY` in
-  `~/.acme.sh/<domain>/<domain>.conf`, **base64-encoded, not encrypted**.
-  Anyone who can read that file can use the key.
-- The key has only Import and Commit rights. Worst case if it leaks: someone
-  imports certificates/files and triggers a commit, which can also push other
-  admins' pending changes. They can't edit policy or read your config through
-  it (that's why Operational Requests stays off).
-- Mitigations: a dedicated box or user for acme.sh, `chmod 700 ~/.acme.sh`,
-  mgmt Permitted IPs limited to that box, and an API key lifetime set under
-  Device > Setup > Management > Authentication Settings (you then re-run
-  keygen when it expires).
+```bash
+crontab -l | grep acme.sh
+echo | openssl s_client -connect "$CERT:443" -servername "$CERT" 2>/dev/null \
+  | openssl x509 -noout -issuer -enddate
+```
+
+---
+
+## Where the credentials live
+
+- **Firewall password:** used once in step 4, never stored.
+- **API key:** in `~/.acme.sh/<domain>_ecc/<domain>.conf` (no `_ecc` for RSA),
+  **base64-encoded, not encrypted.** Anyone who can read that file can use it.
+- **Burner DNS token:** in `~/.acme.sh/account.conf`. It can only change the
+  burner zone.
+
+What a stolen key can do: import certificates or files and trigger a commit,
+which also pushes other admins' pending changes. It can't change policy or
+read your config.
+
+Keep it small: a dedicated box or user, `chmod 700 ~/.acme.sh`, mgmt Permitted
+IPs limited to that box. If you set an API key lifetime (Device > Setup >
+Management > Authentication Settings), renewals fail when the key expires.
+Repeat step 4 before then.
+
+## Panorama
+
+Set these before the deploy in step 5. They're saved for renewals:
+
+```bash
+export PANOS_TEMPLATE="my-template"              # template to import into
+export PANOS_TEMPLATE_STACK="my-stack"           # optional: also push the stack
+export PANOS_CERTNAME="gp-le"                    # optional: Panorama limits names to 31 chars
+```
+
+Pushing a template stack needs **Operational Requests** on the role.
 
 ## Troubleshooting
 
-| Symptom | Cause |
+| Symptom | Cause / fix |
 |---|---|
+| `dig` shows no CNAME | Record missing, or created in the burner zone instead of the real one |
+| Issue fails with DNS error | Token can't edit the burner zone, or the CNAME target is wrong |
+| Keygen: `(90) public key does not match` | The firewall's key changed, or something is intercepting. Redo 4a |
 | Keygen returns error | Wrong password, or the role has no XML API access |
 | Import fails | Role missing **Import** |
+| Deploy fails: key/cert file not found | ECDSA cert without `--ecc` (or RSA with it). Check `acme.sh --list` |
 | Commit fails | Role missing **Commit**, or another admin holds a config lock |
-| First deploy works, renewal fails with a TLS error | Mgmt still self-signed; see prerequisite 4 |
-| Cert name truncated on Panorama | Set `PANOS_CERTNAME` (31-char limit) |
+| Step 7 deploy fails with a TLS error | Mgmt isn't presenting the new cert yet, or `$FW` isn't a name on it. Redo step 6 |
+| Users still see the old cert | The SSL/TLS Service Profile points at a different cert object |
 
 ## License
 
