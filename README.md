@@ -47,7 +47,8 @@ marks items that depend on your mgmt choice ([see below](#choose-how-the-box-wil
 - [ ] `_acme-challenge` CNAME for **each** name on the cert → `_acme-challenge.<burner>`
 
 **acme.sh box**
-- [ ] acme.sh installed as a dedicated, non-root user, default CA set to Let's Encrypt
+- [ ] Tools installed, `acmesh` user created (no password, no sudo)
+- [ ] acme.sh installed as `acmesh`, default CA set to Let's Encrypt
 - [ ] Certificate issued: GlobalProtect name, **(A)** + mgmt FQDN
 - [ ] **(B)** Internal root CA trusted by the box
 - [ ] Mgmt identity checked (trusted cert, or fingerprint verified)
@@ -90,10 +91,11 @@ Pick one:
 
 ---
 
-## Step 0: Set your names (paste in every new shell)
+## Step 0: Set your names
 
 Everything below uses these variables, so the remaining blocks paste as-is.
-The commands assume **bash** (type `bash` first if your shell is zsh).
+Fill them in now, and paste them **as the `acmesh` user** (created in step 2)
+after step 2b and in every new shell. The commands assume **bash**.
 
 ```bash
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
@@ -128,14 +130,38 @@ has entries, add the acme.sh box's IP (an empty list allows any IP). Commit.
 On **Panorama**, create the role (type *Panorama*) and admin the same way,
 under **Panorama > Admin Roles** and **Panorama > Administrators**.
 
-## Step 2: acme.sh box — install
+## Step 2: acme.sh box — user and install
 
-Use a dedicated user, not root. Install from git so you can read what you run:
+**2a. Prepare the box**, from your normal admin account (needs sudo). This
+installs the tools and creates `acmesh`, a user that runs acme.sh and nothing
+else. It has no password (nobody can log in as it directly) and no sudo. It's
+called `acmesh`, not `acme`, so you don't mix it up with the firewall admin.
+
+```bash
+# Debian / Ubuntu
+sudo apt update && sudo apt install -y git curl openssl cron dnsutils
+# RHEL / Rocky / Alma
+sudo dnf install -y git curl openssl cronie bind-utils && sudo systemctl enable --now crond
+
+sudo useradd --create-home --shell /bin/bash acmesh
+sudo chmod 700 /home/acmesh
+```
+
+**2b. Switch to it.** Every later step runs as `acmesh` unless it says
+otherwise:
+
+```bash
+sudo -iu acmesh
+```
+
+Now paste the step 0 variables.
+
+**2c. Install acme.sh** from git, so you can read what you run:
 
 ```bash
 git clone --depth 1 https://github.com/acmesh-official/acme.sh.git
 cd acme.sh && ./acme.sh --install && cd .. && rm -rf acme.sh
-exec "$SHELL"                                    # reload so 'acme.sh' is on PATH
+. ~/.acme.sh/acme.sh.env                         # load acme.sh into this shell
 acme.sh --set-default-ca --server letsencrypt
 chmod 700 ~/.acme.sh
 ```
@@ -180,7 +206,8 @@ which is why it must only be able to edit the burner zone.
 ### Step 3b (B only): trust your internal root CA
 
 Get the root CA cert that signed the mgmt cert (PEM, saved as `corp-root-ca.crt`)
-and add it to the box's system trust store, which acme.sh uses:
+and add it to the box's system trust store, which acme.sh uses. Run this
+from your **admin account** in a second terminal (`acmesh` has no sudo):
 
 ```bash
 # Debian / Ubuntu
@@ -330,7 +357,7 @@ What a stolen key can do: import certificates or files and trigger a commit,
 which also pushes other admins' pending changes. It can't change policy or
 read your config.
 
-Keep it small: a dedicated box or user, `chmod 700 ~/.acme.sh`, mgmt Permitted
+Keep it small: a dedicated box, the `acmesh` user, `chmod 700 ~/.acme.sh`, mgmt Permitted
 IPs limited to that box. If you set an API key lifetime (Device > Setup >
 Management > Authentication Settings), renewals fail when the key expires.
 Before then, repeat steps 0, 4 (it should say `TRUSTED` by now), 5a and 5b.
