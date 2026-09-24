@@ -41,7 +41,7 @@ Print this, or tick it off as you follow the steps below.
 - [ ] Mgmt reachable from the box by an FQDN (DNS or `/etc/hosts`)
 
 **DNS**
-- [ ] Throwaway ("burner") domain on a DNS provider acme.sh supports (https://github.com/acmesh-official/acme.sh/wiki/dnsapi)
+- [ ] Throwaway ("burner") domain on a DNS provider [acme.sh](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) supports 
 - [ ] API token scoped to the burner zone only
 - [ ] `_acme-challenge` CNAME for **each** name on the cert → `_acme-challenge.<burner>`
 
