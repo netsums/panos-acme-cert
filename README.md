@@ -332,10 +332,9 @@ clients don't fail with "untrusted certificate".
 - **GlobalProtect:** Device > Certificate Management > SSL/TLS Service Profile
   → the profile used by the portal/gateway → Certificate = `vpn.example.com`
   (or create a profile and select it in the portal and gateway).
-- **(A) Mgmt:** create an SSL/TLS Service Profile with the same cert →
+- **Mgmt, (A) only:** create an SSL/TLS Service Profile with the same cert →
   **Device > Setup > Management > General Settings** → SSL/TLS Service
   Profile. Mgmt now presents a publicly trusted cert that matches `$FW`.
-- **(B) Mgmt:** nothing to do, it keeps its internal cert.
 - Commit. **Panorama:** make these changes in the template, then commit and
   push to the devices.
 
