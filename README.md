@@ -235,7 +235,7 @@ if ERR="$(curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" 2>&1)"; then
   echo "TRUSTED: mgmt cert verifies. Skip the rest of step 4."
   TLS=(); INSECURE=()
 else
-  echo "NOT TRUSTED: ${ERR%%$'\n'*}"
+  echo; echo "NOT TRUSTED: ${ERR%%$'\n'*}"; echo
 fi
 ```
 
