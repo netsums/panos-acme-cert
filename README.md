@@ -231,16 +231,25 @@ which is why it must only be able to edit the burner zone.
 ## Step 4: Check you're really talking to your firewall
 
 ```bash
-if curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" 2>/dev/null; then
+if ERR="$(curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" 2>&1)"; then
   echo "TRUSTED: mgmt cert verifies. Skip the rest of step 4."
   TLS=(); INSECURE=()
 else
-  echo "NOT TRUSTED: do the fingerprint check below."
+  echo "NOT TRUSTED: ${ERR%%$'\n'*}"
 fi
 ```
 
-**If not trusted** (usual for (A) on a first run, mgmt is still
-self-signed), save the cert mgmt presents and look at its fingerprint:
+Read the reason it prints:
+
+| Reason contains | Meaning | Next |
+|---|---|---|
+| `(60) SSL certificate problem` | Box can't verify the mgmt cert. Normal for (A) on a first run | Fingerprint check below |
+| `(60) … no alternative certificate subject name matches` | Cert is valid, but `$FW` isn't a name on it | Fix `$FW` or the mgmt cert. (B): must match the internal cert |
+| `(6) Could not resolve host` | `$FW` doesn't resolve on the box | DNS or `/etc/hosts` |
+| `(7) Failed to connect` / `(28) timed out` | Can't reach mgmt on 443 | Permitted IPs, routing, host firewall |
+
+**If it's a certificate problem** (usual for (A) on a first run, mgmt is
+still self-signed), save the cert mgmt presents and look at its fingerprint:
 
 ```bash
 echo | openssl s_client -connect "$FW:443" -servername "$FW" 2>/dev/null \
