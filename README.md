@@ -32,7 +32,8 @@ uses it picks up the new cert.
 
 ## Checklist
 
-Print this, or tick it off as you follow the steps below.
+Print this, or tick it off as you follow the steps below. **(A)** / **(B)**
+marks items that depend on your mgmt choice ([see below](#choose-how-the-box-will-trust-mgmt)).
 
 **Firewall**
 - [ ] Admin Role `acme-deploy`: XML API **Import** + **Commit** only, everything else off
@@ -47,20 +48,45 @@ Print this, or tick it off as you follow the steps below.
 
 **acme.sh box**
 - [ ] acme.sh installed as a dedicated, non-root user, default CA set to Let's Encrypt
-- [ ] Certificate issued (GlobalProtect name **+ mgmt FQDN**)
-- [ ] Mgmt certificate fingerprint verified before sending the password
+- [ ] Certificate issued: GlobalProtect name, **(A)** + mgmt FQDN
+- [ ] **(B)** Internal root CA trusted by the box
+- [ ] Mgmt identity checked (trusted cert, or fingerprint verified)
 - [ ] API key generated, password discarded
+- [ ] *(Panorama)* Template variables set
 - [ ] First deploy done
 
 **Firewall, once**
 - [ ] Cert bound to the GlobalProtect portal/gateway SSL/TLS Service Profile
-- [ ] Cert bound to the mgmt SSL/TLS Service Profile (**renewals depend on this**)
-- [ ] Commit
+- [ ] **(A)** Cert bound to the mgmt SSL/TLS Service Profile
+- [ ] Commit (*Panorama:* commit and push)
 
 **Hands-off check**
 - [ ] Deploy works *without* `--insecure`
 - [ ] Renewal notifications go to a mailbox someone reads
 - [ ] Calendar reminder at 80 days in case everything else fails
+
+---
+
+## Choose how the box will trust mgmt
+
+Renewals run unattended, with normal TLS checks against the mgmt interface.
+The acme.sh box must trust the mgmt cert, and `$FW` must be a name on it.
+Pick one:
+
+| | Mgmt cert | `$FW` is | Extra work |
+|---|---|---|---|
+| **(A)** | This Let's Encrypt cert | A public name, e.g. `fw-mgmt.example.com` | One more CNAME; bind the cert to mgmt in step 6 |
+| **(B)** | From your internal PKI | An internal name, e.g. `fw01.corp.local` | Trust your internal root CA on the box (step 3b) |
+
+- **No internal PKI but don't want a public name for mgmt?** Use (B) with the
+  firewall as its own CA: **Device > Certificate Management > Certificates >
+  Generate**, tick *Certificate Authority*, then generate a mgmt cert signed
+  by it with the mgmt FQDN as Common Name **and** as a *Host Name* attribute.
+  Bind it to mgmt, and trust the firewall's CA cert on the box in step 3b.
+- **Leaving mgmt on its default self-signed cert** works for the first
+  deploy only. Every renewal fails. That's not hands-off.
+- **Panorama:** the cert is imported into a template, not onto Panorama
+  itself, so Panorama's own mgmt can't use it. Use (B) for Panorama.
 
 ---
 
@@ -71,7 +97,7 @@ The commands assume **bash** (type `bash` first if your shell is zsh).
 
 ```bash
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
-FW=fw-mgmt.example.com        # mgmt FQDN, also put on the cert (see step 3)
+FW=fw-mgmt.example.com        # mgmt FQDN: public (A) or internal (B)
 FWUSER=acme                   # restricted admin you create in step 1
 BURNER=burner-domain.net      # throwaway domain for DNS validation
 ```
@@ -99,6 +125,9 @@ once, in step 5).
 **Device > Setup > Interfaces > Management** → if *Permitted IP Addresses*
 has entries, add the acme.sh box's IP (an empty list allows any IP). Commit.
 
+On **Panorama**, create the role (type *Panorama*) and admin the same way,
+under **Panorama > Admin Roles** and **Panorama > Administrators**.
+
 ## Step 2: acme.sh box — install
 
 Use a dedicated user, not root. Install from git so you can read what you run:
@@ -116,28 +145,29 @@ emails in 2025. Step 7 sets up alerts you control instead.
 
 ## Step 3: DNS delegation and issuing
 
-Put **both** the GlobalProtect name and the mgmt FQDN on the cert. Binding it
-to mgmt later is what makes renewals work without `--insecure`.
-
-In your **real** DNS zone, one CNAME per name:
+In your **real** DNS zone, one CNAME per name on the cert:
 
 ```
 _acme-challenge.vpn.example.com.      CNAME  _acme-challenge.burner-domain.net.
-_acme-challenge.fw-mgmt.example.com.  CNAME  _acme-challenge.burner-domain.net.
+_acme-challenge.fw-mgmt.example.com.  CNAME  _acme-challenge.burner-domain.net.   ← (A) only
 ```
 
 Check them:
 
 ```bash
 dig +short CNAME "_acme-challenge.$CERT"
-dig +short CNAME "_acme-challenge.$FW"
+dig +short CNAME "_acme-challenge.$FW"     # (A) only
 ```
 
-Issue (Cloudflare shown; any [acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works):
+Issue (Cloudflare shown; any [acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works).
+Paste the first line, then **one** of the two `--issue` lines, then `unset`:
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
+
+acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"   # (A)
+acme.sh --issue --dns dns_cf -d "$CERT"          --challenge-alias "$BURNER"   # (B)
+
 unset CF_Token
 ```
 
@@ -147,10 +177,34 @@ Cloudflare module reads exactly that variable name. acme.sh then saves the
 token for renewals (see [Where the credentials live](#where-the-credentials-live)),
 which is why it must only be able to edit the burner zone.
 
+### Step 3b (B only): trust your internal root CA
+
+Get the root CA cert that signed the mgmt cert (PEM, saved as `corp-root-ca.crt`)
+and add it to the box's system trust store, which acme.sh uses:
+
+```bash
+# Debian / Ubuntu
+sudo cp corp-root-ca.crt /usr/local/share/ca-certificates/ && sudo update-ca-certificates
+# RHEL / Rocky / Alma
+sudo cp corp-root-ca.crt /etc/pki/ca-trust/source/anchors/ && sudo update-ca-trust
+```
+
+Don't use acme.sh's `--ca-bundle` for this instead. It *replaces* the trusted
+CAs for all acme.sh traffic, so talking to Let's Encrypt breaks.
+
 ## Step 4: Check you're really talking to your firewall
 
-Mgmt is probably still on its self-signed cert, so TLS can't verify it for
-you. Save the cert it presents and look at its fingerprint:
+```bash
+if curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" 2>/dev/null; then
+  echo "TRUSTED: mgmt cert verifies. Skip the rest of step 4."
+  TLS=(); INSECURE=()
+else
+  echo "NOT TRUSTED: do the fingerprint check below."
+fi
+```
+
+**If not trusted** (usual for (A) on a first run, mgmt is still
+self-signed), save the cert mgmt presents and look at its fingerprint:
 
 ```bash
 echo | openssl s_client -connect "$FW:443" -servername "$FW" 2>/dev/null \
@@ -161,22 +215,40 @@ openssl x509 -in fw-mgmt.pem -noout -subject -fingerprint -sha256
 Compare it with the real one: on the firewall, **Device > Certificate
 Management > Certificates**, export the cert used by mgmt, then run
 `openssl x509 -in <exported file> -noout -fingerprint -sha256` on it. **Only
-continue if they match.**
-
-## Step 5: API key and first deploy
-
-**5a. Generate the API key.** The password is read hidden and handed to curl
-on stdin, so it isn't in shell history or `ps`. `--pinnedpubkey` makes curl
-refuse to send anything unless the firewall presents the key you checked in
-step 4. The API key goes straight into a variable and is never shown, so
-there's nothing to copy.
+if they match**, pin it:
 
 ```bash
 PIN="sha256//$(openssl x509 -in fw-mgmt.pem -pubkey -noout \
   | openssl pkey -pubin -outform der | openssl dgst -sha256 -binary | openssl base64)"
+TLS=(-k --pinnedpubkey "$PIN"); INSECURE=(--insecure)
+```
 
+From here on, curl refuses to send anything unless the firewall presents
+exactly that key.
+
+## Panorama only: before step 5
+
+Set these in the same shell. acme.sh saves them for renewals:
+
+```bash
+export PANOS_TEMPLATE="my-template"              # template to import into
+export PANOS_TEMPLATE_STACK="my-stack"           # optional: also push the stack
+export PANOS_CERTNAME="gp-le"                    # optional: Panorama limits names to 31 chars
+```
+
+Pushing a template stack needs **Operational Requests** on the role.
+If the GlobalProtect config lives in a Panorama template, deploy to Panorama:
+the firewalls get the cert with the template push.
+
+## Step 5: API key and first deploy
+
+**5a. Generate the API key.** The password is read hidden and handed to curl
+on stdin, so it isn't in shell history or `ps`. The API key goes straight
+into a variable and is never shown, so there's nothing to copy.
+
+```bash
 read -rsp "Password for $FWUSER: " P; echo
-RESP="$(printf '%s' "$P" | curl -sS -k --pinnedpubkey "$PIN" -X POST "https://$FW/api/?type=keygen" \
+RESP="$(printf '%s' "$P" | curl -sS "${TLS[@]}" -X POST "https://$FW/api/?type=keygen" \
     --data-urlencode "user=$FWUSER" --data-urlencode 'password@-')"
 unset P
 PANOS_KEY="$(sed -n 's:.*<key>\(.*\)</key>.*:\1:p' <<<"$RESP")"
@@ -191,27 +263,29 @@ Continue only if it says `API key OK`.
 ```bash
 acme.sh --list    # KeyLength "ec-256" = ECDSA → keep --ecc. "2048" → remove --ecc
 export PANOS_HOST="$FW" PANOS_USER="$FWUSER" PANOS_KEY
-acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc --insecure
+acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc "${INSECURE[@]}"
 unset PANOS_KEY
 ```
 
-`--insecure` is needed **this once** because mgmt is still self-signed (you
-checked its identity in step 4). It is not saved. acme.sh stores host, user
-and key for renewals.
+`${INSECURE[@]}` is `--insecure` only if mgmt wasn't trusted in step 4 (you
+checked its identity by fingerprint instead). It applies to this run only and
+isn't saved. acme.sh stores host, user and key for renewals.
 
-The cert appears under **Device > Certificate Management > Certificates**,
-named after `$CERT`. The hook commits only the `$FWUSER` admin's changes.
+The cert appears under **Device > Certificate Management > Certificates**
+(Panorama: in the template), named after `$CERT` or `$PANOS_CERTNAME`. The
+hook commits only the `$FWUSER` admin's changes.
 
 ## Step 6: Firewall — bind the cert (once)
 
 - **GlobalProtect:** Device > Certificate Management > SSL/TLS Service Profile
   → the profile used by the portal/gateway → Certificate = `vpn.example.com`
   (or create a profile and select it in the portal and gateway).
-- **Mgmt:** create an SSL/TLS Service Profile with the same cert → **Device >
-  Setup > Management > General Settings** → SSL/TLS Service Profile.
-- Commit.
-
-Mgmt now presents a publicly trusted cert that matches `$FW`.
+- **(A) Mgmt:** create an SSL/TLS Service Profile with the same cert →
+  **Device > Setup > Management > General Settings** → SSL/TLS Service
+  Profile. Mgmt now presents a publicly trusted cert that matches `$FW`.
+- **(B) Mgmt:** nothing to do, it keeps its internal cert.
+- Commit. **Panorama:** make these changes in the template, then commit and
+  push to the devices.
 
 ## Step 7: Make renewals hands-off
 
@@ -259,21 +333,7 @@ read your config.
 Keep it small: a dedicated box or user, `chmod 700 ~/.acme.sh`, mgmt Permitted
 IPs limited to that box. If you set an API key lifetime (Device > Setup >
 Management > Authentication Settings), renewals fail when the key expires.
-Before then, repeat 5a without `-k --pinnedpubkey "$PIN"` (mgmt has a trusted
-cert by now), then the deploy from step 7 in the same shell, with
-`export PANOS_HOST="$FW" PANOS_USER="$FWUSER" PANOS_KEY` first.
-
-## Panorama
-
-Set these before the deploy in step 5. They're saved for renewals:
-
-```bash
-export PANOS_TEMPLATE="my-template"              # template to import into
-export PANOS_TEMPLATE_STACK="my-stack"           # optional: also push the stack
-export PANOS_CERTNAME="gp-le"                    # optional: Panorama limits names to 31 chars
-```
-
-Pushing a template stack needs **Operational Requests** on the role.
+Before then, repeat steps 0, 4 (it should say `TRUSTED` by now), 5a and 5b.
 
 ## Troubleshooting
 
@@ -281,12 +341,14 @@ Pushing a template stack needs **Operational Requests** on the role.
 |---|---|
 | `dig` shows no CNAME | Record missing, or created in the burner zone instead of the real one |
 | Issue fails with DNS error | Token can't edit the burner zone, or the CNAME target is wrong |
+| Step 4: `unable to load certificate` | Box can't reach mgmt on 443: Permitted IPs, routing, or wrong `$FW` |
+| (B) Step 4 says NOT TRUSTED | Root CA not in the trust store (step 3b), or `$FW` isn't a name on the mgmt cert |
 | Keygen: `(90) public key does not match` | The firewall's key changed, or something is intercepting. Redo step 4 |
 | Keygen returns error | Wrong password, or the role has no XML API access |
 | Import fails | Role missing **Import** |
 | Deploy fails: key/cert file not found | ECDSA cert without `--ecc` (or RSA with it). Check `acme.sh --list` |
 | Commit fails | Role missing **Commit**, or another admin holds a config lock |
-| Step 7 deploy fails with a TLS error | Mgmt isn't presenting the new cert yet, or `$FW` isn't a name on it. Redo step 6 |
+| Step 7 deploy fails with a TLS error | (A) Mgmt isn't presenting the new cert yet, or `$FW` isn't a name on it: redo step 6. (B) See step 3b |
 | Users still see the old cert | The SSL/TLS Service Profile points at a different cert object |
 
 ## License
