@@ -323,6 +323,10 @@ The cert appears under **Device > Certificate Management > Certificates**
 (Panorama: in the template), named after `$CERT` or `$PANOS_CERTNAME`. The
 hook commits only the `$FWUSER` admin's changes.
 
+The hook uploads acme.sh's full-chain file: your certificate **plus** the
+Let's Encrypt intermediate. The firewall serves the complete chain, so
+clients don't fail with "untrusted certificate".
+
 ## Step 6: Firewall — bind the cert (once)
 
 - **GlobalProtect:** Device > Certificate Management > SSL/TLS Service Profile
@@ -363,6 +367,17 @@ crontab -l | grep acme.sh
 echo | openssl s_client -connect "$CERT:443" -servername "$CERT" 2>/dev/null \
   | openssl x509 -noout -issuer -enddate
 ```
+
+**Check the firewall serves the full chain:**
+
+```bash
+echo | openssl s_client -connect "$CERT:443" -servername "$CERT" 2>/dev/null \
+  | grep -E '^ *[0-9]+ s:|^ +i:'
+```
+
+`0` is your certificate, `1` the Let's Encrypt intermediate (e.g. `YE2`), and
+there may be a `2`. If you only see `0`, the intermediate is missing and some
+clients will reject the certificate.
 
 ---
 
