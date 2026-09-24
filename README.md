@@ -288,9 +288,11 @@ the firewalls get the cert with the template push.
 
 ## Step 5: API key and first deploy
 
-**5a. Generate the API key.** The password is read hidden and handed to curl
-on stdin, so it isn't in shell history or `ps`. The API key goes straight
-into a variable and is never shown, so there's nothing to copy.
+**5a. Generate the API key.** The password is read hidden and passed to curl
+on stdin, so it never appears on screen, in shell history or in `ps`. It's
+sent only to the firewall you verified in step 4, used once to generate the
+API key, and removed from the shell right after (`unset P`). The API key goes
+straight into a variable and is never shown on screen.
 
 ```bash
 read -rsp "Password for $FWUSER: " P; echo
