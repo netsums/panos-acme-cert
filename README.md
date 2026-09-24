@@ -145,6 +145,7 @@ remaining blocks paste as-is. If you open a new shell later, repeat 0b and 0c.
 ```bash
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
 FW=fw-mgmt.example.com        # mgmt FQDN: public (A) or internal (B)
+                              # Panorama: Panorama's mgmt FQDN, not the firewall's
 FWUSER=acme                   # restricted admin you create in step 1
 BURNER=burner-domain.net      # throwaway domain for DNS validation
 ```
