@@ -160,29 +160,34 @@ all acme.sh traffic, so talking to Let's Encrypt breaks.
 ## Step 0: Prepare the box and set your names
 
 **0a. Tools and user**, from your normal admin account (needs sudo). This
-installs the tools and creates `acmesh`, a user that runs acme.sh and nothing
-else. It has no password (nobody can log in as it directly) and no sudo. It's
-called `acmesh`, not `acme`, so you don't mix it up with the firewall admin.
+installs the tools and creates the Linux user in `$BOXUSER` (here `acmesh`),
+a user that runs acme.sh and nothing else. It has no password (nobody can log
+in as it directly) and no sudo. It's called `acmesh`, not `acme`, so you don't
+mix it up with the firewall admin (`$FWUSER`, step 0c). If your company has a
+naming rule for service accounts, change `BOXUSER` here.
 
 ```bash
+BOXUSER=acmesh                # Linux user that runs acme.sh (not the firewall admin)
+
 # Debian / Ubuntu
 sudo apt update && sudo apt install -y git curl openssl cron dnsutils
 # RHEL / Rocky / Alma
 sudo dnf install -y git curl openssl cronie bind-utils && sudo systemctl enable --now crond
 
-sudo useradd --create-home --shell /bin/bash acmesh
-sudo chmod 700 /home/acmesh
+sudo useradd --create-home --shell /bin/bash "$BOXUSER"
+sudo chmod 700 "/home/$BOXUSER"
 ```
 
-**0b. Switch to it.** Every later command runs as `acmesh` unless it says
+**0b. Switch to it.** Every later command runs as that user unless it says
 otherwise. Keep this shell open while you do step 1 in the firewall GUI.
 
 ```bash
-sudo -iu acmesh
+sudo -iu "$BOXUSER"
 ```
 
 **0c. Set your names.** Everything below uses these variables, so the
-remaining blocks paste as-is. If you open a new shell later, repeat 0b and 0c.
+remaining blocks paste as-is. If you open a new shell later, set `BOXUSER`
+again, then repeat 0b and 0c.
 
 ```bash
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
