@@ -1,7 +1,8 @@
 # panos-acme-cert
 
 Free, auto-renewing Let's Encrypt certificates for Palo Alto NGFW (GlobalProtect
-portal/gateway, mgmt, captive portal, …) using
+portal/gateway, mgmt, Authentication Portal, SSL Inbound Inspection, see
+[Other uses](#other-uses-of-the-cert)) using
 [acme.sh](https://github.com/acmesh-official/acme.sh).
 
 - **No script from this repo to trust.** Every step is a command you can read
@@ -41,10 +42,11 @@ uses it picks up the new cert.
 
 Two rules cover all four:
 
-- **One certificate, one target.** acme.sh saves one destination per
+- **One certificate, one target.** acme.sh saves one PAN-OS destination per
   certificate: a device (a firewall, or Panorama itself) or a Panorama
   template. Bigger setups simply have more certificates, on the same box,
-  renewed by the same cron job.
+  renewed by the same cron job. (Hooks for other systems, e.g. a web server,
+  can come on top, see [Other uses](#other-uses-of-the-cert).)
 - **The box must trust the mgmt it deploys to.** The renewal with Let's Encrypt
   works regardless, but delivering the new cert means an HTTPS login to mgmt
   with normal TLS checks. If that fails, the new cert stays on the box and the
@@ -443,7 +445,10 @@ the last one is done.
        changes may need read-write on Panorama > Templates.
      - Mgmt SSL/TLS Service Profile set from a shared template (3a) and from a device template (3b)
        is applied on the firewalls after the push.
-     - Panorama HA: does each Panorama peer need its own mgmt cert? -->
+     - Panorama HA: does each Panorama peer need its own mgmt cert?
+     - SSL Inbound Inspection via Panorama: can a decryption rule in a device group select a
+       certificate that lives in a template? -->
+
 
 ### 1. Panorama's own mgmt (always first)
 
@@ -603,6 +608,40 @@ which is why 3a or 3b are the better fit when you have Panorama.
   Renewals don't count against it.
 - **Change windows.** Leave out `PANOS_TEMPLATE_STACK` and let your regular push
   deliver the certs.
+
+---
+
+## Other uses of the cert
+
+GlobalProtect and mgmt are the common cases, not the only ones. A Let's
+Encrypt cert fits anywhere the firewall is the **TLS server for a public
+name**. Same flow: issue, deploy, bind once.
+
+| Use | Works? | Bind it in |
+|---|---|---|
+| GlobalProtect portal/gateway | Yes | SSL/TLS Service Profile |
+| Mgmt web UI and API | Yes | SSL/TLS Service Profile → Device > Setup > Management |
+| Authentication Portal | Yes | SSL/TLS Service Profile → Device > User Identification > Authentication Portal Settings |
+| SSL Inbound Inspection | Yes, with the same cert and key on the web server | Decryption policy rule, type SSL Inbound Inspection |
+| SSL Forward Proxy | **No.** It needs a CA certificate that signs certs on the fly. No public CA issues one | Keep your internal CA |
+| The firewall authenticating as a TLS client | **No.** Let's Encrypt certs are for servers only; the client-auth EKU was dropped in 2026 | Internal PKI |
+
+**SSL Inbound Inspection.** The firewall needs the web server's certificate and
+private key, so the firewall and the server must get the same cert. Give the
+deploy two hooks: `panos` first, then one for the server (acme.sh ships many,
+e.g. `ssh`). Hooks run in the order given, and if one fails the rest are
+skipped, so the server never gets a cert the firewall doesn't have yet. That's
+also the order Palo Alto recommends: firewall first, then the server.
+
+```bash
+acme.sh --deploy -d www.example.com --deploy-hook panos --deploy-hook ssh --ecc
+```
+
+Each hook reads its own variables on the first deploy, see the acme.sh
+[deploy hooks wiki](https://github.com/acmesh-official/acme.sh/wiki/deployhooks).
+Bind once: select the cert in the decryption rule (PAN-OS 10.2 and later accept
+several certs per rule). With `--always-force-new-domain-key`, firewall and
+server get the new key together at every renewal.
 
 ---
 
