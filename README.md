@@ -12,6 +12,12 @@ portal/gateway, mgmt, Authentication Portal, SSL Inbound Inspection, see
 - **Your production DNS credentials never touch the box.** Validation goes
   through a delegated throwaway domain.
 
+**Why a separate box?** Up to PAN-OS 12.2, neither the firewall nor Panorama
+has a built-in ACME client, so they can't get or renew a public certificate
+on their own. PAN-OS auto-enrollment (SCEP) only works with an internal CA. So
+the ACME part runs on a small Linux box, and PAN-OS only receives the result
+through its API.
+
 ---
 
 ## How it works
