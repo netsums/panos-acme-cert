@@ -251,23 +251,44 @@ dig +short CNAME "_acme-challenge.$CERT"
 dig +short CNAME "_acme-challenge.$FW"     # (A) only
 ```
 
-Issue (Cloudflare shown; any [acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works).
-Paste **one** of the two blocks.
+Issue (Cloudflare shown; any [acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works),
+in two runs:
+
+1. **Test against staging.** Let's Encrypt's test server runs the same checks
+   (CNAMEs, token, challenge alias) without the production rate limits. Its
+   certs aren't trusted: don't deploy one.
+2. **Issue the real cert, with `--force`.** Without it, acme.sh sees the same
+   names, prints `Domains not changed`, skips, and keeps renewing against
+   staging.
+
+Paste **one** of the two variants.
 
 **(A)** GlobalProtect name + mgmt name on the cert:
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
-unset CF_Token
+acme.sh --issue --staging --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
 ```
 
-**(B)** GlobalProtect name only:
+Ended with `Cert success`? Then the real one, in the same shell:
+
+```bash
+acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER" --force
+unset CF_Token
+acme.sh --list    # CA column: LetsEncrypt.org. LetsEncrypt.org_test = still the staging cert
+```
+
+**(B)** GlobalProtect name only: the same two runs, without `-d "$FW"`:
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
+acme.sh --issue --staging --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
+```
+
+```bash
+acme.sh --issue --dns dns_cf -d "$CERT" --challenge-alias "$BURNER" --force
 unset CF_Token
+acme.sh --list
 ```
 
 `read -s` puts the token in the `CF_Token` variable without showing it on
@@ -453,6 +474,10 @@ Do steps 0 to 5a once, with `$FW` set to Panorama's mgmt FQDN and the admin
 from step 1 created on Panorama. Keep that shell open: every certificate below
 is deployed with the same Panorama API key, so `$PANOS_KEY` must stay set until
 the last one is done.
+
+The `--issue` lines below are the production runs. Test each new name with
+`--staging` first, as in [step 3](#step-3-dns-delegation-and-issuing), and
+then add `--force` to the real run.
 
 <!-- TODO Ricardo, verify in the lab before merging:
      - Panorama role type "Panorama" with XML API Import + Commit (Web UI all off) can import into
@@ -699,8 +724,8 @@ every renewal comes with a fresh key. That's what makes short lifetimes a real
 security gain: a leaked key dies with its cert. The deploy imports cert and key
 together, so the firewall needs nothing extra.
 
-**Already issued?** Run your step 3 `--issue` block again with the new option
-and `--force` added. That issues a new certificate now. Then deploy it with
+**Already issued?** Run your step 3 production `--issue` line again with the
+new option added (it already has `--force`). That issues a new certificate now. Then deploy it with
 the step 7 deploy command. acme.sh saves the options for all future renewals.
 
 ---
@@ -776,6 +801,8 @@ then covers the wildcard and every name below it.
 | Wildcard deploy fails on the object name | Set `PANOS_CERTNAME`: PAN-OS doesn't accept `*` in a name |
 | Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or set `PANOS_TEMPLATE_STACK` (role needs Operational Requests) |
 | Issue fails with a CAA error | CAA `accounturi` doesn't match: staging account, or a different acme.sh install |
+| `Domains not changed` … `Skipping` after the staging test | The real run needs `--force` (step 3). `acme.sh --list` shows `LetsEncrypt.org_test` in the CA column while it's still the staging cert |
+| Browser says the cert isn't trusted, issuer mentions "STAGING" | A staging cert was deployed. Issue the real one with `--force` (step 3), then deploy again |
 | Issue fails: too many certificates | Let's Encrypt limit of 50 new certs per registered domain per 7 days. Spread the rollout |
 
 ## License
