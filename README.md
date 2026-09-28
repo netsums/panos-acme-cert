@@ -109,13 +109,17 @@ marks items that depend on your mgmt choice ([see below](#choose-how-the-box-wil
 ## Choose how the box will trust mgmt
 
 Renewals run unattended, with normal TLS checks against the mgmt interface.
-The acme.sh box must trust the mgmt cert, and `$FW` must be a name on it.
+The acme.sh box must trust the mgmt cert, and `$FW` must be a name (or IP)
+on it. With (A) that means a name: Let's Encrypt only issues IP certs for
+public IPs, valid for about six days, and validates them over HTTP/TLS from
+the internet, never via DNS, so the burner delegation can't be used. With (B)
+your internal CA can include the mgmt IP, and `$FW` can then be that IP.
 Pick one:
 
 | | Mgmt cert | `$FW` is | Extra work |
 |---|---|---|---|
 | **(A)** | This Let's Encrypt cert | A public name, e.g. `fw-mgmt.example.com` | One more CNAME; bind the cert to mgmt in step 6 |
-| **(B)** | From your internal PKI | An internal name, e.g. `fw01.corp.local` | The box must trust your internal root CA (see below) |
+| **(B)** | From your internal PKI | An internal name, e.g. `fw01.corp.local`, or the mgmt IP if it's on the cert | The box must trust your internal root CA (see below) |
 
 - **No internal PKI but don't want a public name for mgmt?** Use (B) with the
   firewall as its own CA: **Device > Certificate Management > Certificates >
