@@ -204,13 +204,11 @@ BURNER=burner-domain.net      # throwaway domain for DNS validation
 | Tab | Setting |
 |---|---|
 | Web UI | disable **everything** |
-| XML API | disable everything, then enable **Import** and **Commit** only |
+| XML API | disable everything, then enable **Import** and **Commit** only. Panorama: add **Operational Requests** only if acme.sh should push the template stack itself (`PANOS_TEMPLATE_STACK`) |
 | Command Line | None |
 | REST API | disable everything |
 
 New roles start with most permissions *enabled*. Check every tab.
-
-> **Operational Requests** is needed for Panorama, so it can push the certificate to a template stack.
 
 **Device > Administrators > Add** → the name you set as `$FWUSER` (e.g.
 `acme`), Role Based → `acme-deploy`, long random password (you'll type it
