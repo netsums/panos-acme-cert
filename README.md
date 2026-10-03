@@ -80,7 +80,7 @@ marks items that depend on your mgmt choice ([see below](#choose-how-the-box-wil
 
 **DNS**
 - [ ] Throwaway ("burner") domain on a DNS provider [acme.sh](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) supports 
-- [ ] API token scoped to the burner zone only (Cloudflare: **Zone > DNS > Edit**, plus the zone's Zone ID)
+- [ ] API token scoped to the burner zone only (Cloudflare: a **user token** from *My Profile > API Tokens*, permission **Zone > DNS > Edit**, plus the zone's Zone ID)
 - [ ] `_acme-challenge` CNAME for **each** name on the cert → `_acme-challenge.<burner>`
 
 **acme.sh box**
@@ -294,7 +294,7 @@ acme.sh --list
 screen or saving it in shell history. `export` hands it to acme.sh, whose
 Cloudflare module reads exactly that variable name. The zone ID isn't a
 secret, so it's read without `-s`; find it on the burner zone's Overview page,
-under API. `CF_Zone_ID` tells acme.sh which zone to write to, so the token needs nothing beyond
+under API. `CF_Zone_ID` tells acme.sh which zone to write to, so the user token needs nothing beyond
 **Zone > DNS > Edit** on the burner zone. Without it, acme.sh has to look the
 zone up by name, which also needs **Zone > Zone > Read** on the token. acme.sh then
 saves the token and zone ID for renewals (see [Where the credentials live](#where-the-credentials-live)),
