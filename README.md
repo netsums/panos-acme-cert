@@ -195,8 +195,6 @@ FW=fw-mgmt.example.com        # mgmt FQDN: public (A) or internal (B)
                               # Panorama: Panorama's mgmt FQDN, not the firewall's
 FWUSER=acme                   # restricted admin you create in step 1
 BURNER=burner-domain.net      # throwaway domain for DNS validation
-export CF_Zone_ID=0123456789abcdef0123456789abcdef
-                              # Cloudflare: burner zone's Zone ID (zone Overview > API)
 ```
 
 ## Step 1: Firewall — role and admin
@@ -266,6 +264,7 @@ Paste **one** of the two variants.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --staging --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
 ```
 
@@ -281,6 +280,7 @@ acme.sh --list    # CA column: LetsEncrypt.org. LetsEncrypt.org_test = still the
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --staging --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
 ```
 
@@ -292,7 +292,7 @@ acme.sh --list
 
 `read -s` puts the token in the `CF_Token` variable without showing it on
 screen or saving it in shell history. `export` hands it to acme.sh, whose
-Cloudflare module reads exactly that variable name. `CF_Zone_ID` (step 0c)
+Cloudflare module reads exactly that variable name. `CF_Zone_ID`
 tells it which zone to write to, so the token needs nothing beyond
 **Zone > DNS > Edit** on the burner zone. Without it, acme.sh has to look the
 zone up by name, which also needs **Zone > Zone > Read** on the token. acme.sh then
@@ -504,6 +504,7 @@ _acme-challenge.panorama.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```bash
 PANO=panorama.example.com                        # same as $FW
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --dns dns_cf -d "$PANO" --challenge-alias "$BURNER"
 unset CF_Token
 export PANOS_HOST="$PANO" PANOS_USER="$FWUSER" PANOS_KEY
@@ -532,6 +533,7 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
 unset CF_Token
 PANOS_TEMPLATE="GP-Template" PANOS_TEMPLATE_STACK="GP-Stack" \
@@ -575,6 +577,7 @@ _acme-challenge.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --dns dns_cf -d '*.fw.example.com' --challenge-alias "$BURNER"
 unset CF_Token
 PANOS_TEMPLATE="FW-Mgmt-Template" PANOS_CERTNAME="fw-mgmt-wildcard" \
@@ -606,6 +609,7 @@ _acme-challenge.fw02.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 for FWN in fw01 fw02 fw03; do
   acme.sh --issue --dns dns_cf -d "$FWN.fw.example.com" --challenge-alias "$BURNER" \
   && PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt" \
