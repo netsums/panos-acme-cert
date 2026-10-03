@@ -80,7 +80,7 @@ marks items that depend on your mgmt choice ([see below](#choose-how-the-box-wil
 
 **DNS**
 - [ ] Throwaway ("burner") domain on a DNS provider [acme.sh](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) supports 
-- [ ] API token scoped to the burner zone only
+- [ ] API token scoped to the burner zone only (Cloudflare: **Zone > DNS > Edit**, plus the zone's Zone ID)
 - [ ] `_acme-challenge` CNAME for **each** name on the cert → `_acme-challenge.<burner>`
 
 **acme.sh box**
@@ -264,6 +264,7 @@ Paste **one** of the two variants.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --staging --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
 ```
 
@@ -279,6 +280,7 @@ acme.sh --list    # CA column: LetsEncrypt.org. LetsEncrypt.org_test = still the
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --staging --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
 ```
 
@@ -290,9 +292,12 @@ acme.sh --list
 
 `read -s` puts the token in the `CF_Token` variable without showing it on
 screen or saving it in shell history. `export` hands it to acme.sh, whose
-Cloudflare module reads exactly that variable name. acme.sh then saves the
-token for renewals (see [Where the credentials live](#where-the-credentials-live)),
-which is why it must only be able to edit the burner zone.
+Cloudflare module reads exactly that variable name. `CF_Zone_ID`
+tells it which zone to write to, so the token needs nothing beyond
+**Zone > DNS > Edit** on the burner zone. Without it, acme.sh has to look the
+zone up by name, which also needs **Zone > Zone > Read** on the token. acme.sh then
+saves the token and zone ID for renewals (see [Where the credentials live](#where-the-credentials-live)),
+which is why the token must only be able to edit the burner zone.
 
 ## Step 4: Check you're really talking to your firewall
 
@@ -499,6 +504,7 @@ _acme-challenge.panorama.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```bash
 PANO=panorama.example.com                        # same as $FW
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --dns dns_cf -d "$PANO" --challenge-alias "$BURNER"
 unset CF_Token
 export PANOS_HOST="$PANO" PANOS_USER="$FWUSER" PANOS_KEY
@@ -527,6 +533,7 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
 unset CF_Token
 PANOS_TEMPLATE="GP-Template" PANOS_TEMPLATE_STACK="GP-Stack" \
@@ -570,6 +577,7 @@ _acme-challenge.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 acme.sh --issue --dns dns_cf -d '*.fw.example.com' --challenge-alias "$BURNER"
 unset CF_Token
 PANOS_TEMPLATE="FW-Mgmt-Template" PANOS_CERTNAME="fw-mgmt-wildcard" \
@@ -601,6 +609,7 @@ _acme-challenge.fw02.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+export CF_Zone_ID=0123456789abcdef0123456789abcdef   # burner zone ID: Cloudflare zone Overview > API
 for FWN in fw01 fw02 fw03; do
   acme.sh --issue --dns dns_cf -d "$FWN.fw.example.com" --challenge-alias "$BURNER" \
   && PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt" \
@@ -732,7 +741,9 @@ the step 7 deploy command. acme.sh saves the options for all future renewals.
 - **Firewall password:** used once in step 5a, never stored.
 - **API key:** in `~/.acme.sh/<domain>_ecc/<domain>.conf` (no `_ecc` for RSA),
   **base64-encoded, not encrypted.** Anyone who can read that file can use it.
-- **Burner DNS token:** in `~/.acme.sh/account.conf`. It can only change the
+- **Burner DNS token:** in each cert's `~/.acme.sh/<domain>_ecc/<domain>.conf`,
+  next to the API key (with `CF_Zone_ID` set; without it, in
+  `~/.acme.sh/account.conf`). It can only change the
   burner zone. It can't touch your real DNS, but it can pass validation for
   every name whose `_acme-challenge` CNAME points to the burner, i.e. get a
   valid cert for those names. [CAA](#optional-lock-issuance-to-your-account-caa)
