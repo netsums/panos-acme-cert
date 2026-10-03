@@ -210,8 +210,7 @@ BURNER=burner-domain.net      # throwaway domain for DNS validation
 
 New roles start with most permissions *enabled*. Check every tab.
 
-> Leave **Operational Requests** off. It would let a stolen key run
-> `show config running`. Only Panorama pushing to a template stack needs it.
+> **Operational Requests** is needed for Panorama, so it can push the certificate to a template stack.
 
 **Device > Administrators > Add** → the name you set as `$FWUSER` (e.g.
 `acme`), Role Based → `acme-deploy`, long random password (you'll type it
