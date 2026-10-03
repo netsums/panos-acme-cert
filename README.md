@@ -204,7 +204,7 @@ BURNER=burner-domain.net      # throwaway domain for DNS validation
 | Tab | Setting |
 |---|---|
 | Web UI | disable **everything** |
-| XML API | disable everything, then enable **Import** and **Commit** only (firewall). Panorama: **Import**, **Commit** and **Operational Requests** |
+| XML API | disable everything, then enable **Import** and **Commit** only. Panorama: add **Operational Requests** only if you push a template stack (`PANOS_TEMPLATE_STACK`) |
 | Command Line | None |
 | REST API | disable everything |
 
