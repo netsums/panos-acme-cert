@@ -781,6 +781,30 @@ fw-mgmt.example.com.  CAA 0 issue "letsencrypt.org; accounturi=https://acme-v02.
 For a wildcard like `*.fw.example.com`, put the record on `fw.example.com`. It
 then covers the wildcard and every name below it.
 
+Check what's published:
+
+```bash
+dig +short CAA vpn.example.com
+```
+
+You should see your record. If your real zone is on Cloudflare with Universal
+SSL, Cloudflare also publishes CAA records for its own CAs. None of them may be
+a bare `letsencrypt.org` without `accounturi`, or any Let's Encrypt account can
+issue again.
+
+To test that the record blocks, issue once with a wrong `accounturi` in it.
+Deactivate first, or Let's Encrypt reuses the earlier validation and skips the
+CAA check:
+
+```bash
+acme.sh --deactivate -d vpn.example.com
+acme.sh --renew -d vpn.example.com --force
+```
+
+That should fail with a CAA error. Put the right URL back, and the same two
+commands should issue again. Each `--force` that succeeds is a real cert, so
+mind the 5 duplicate certs per week.
+
 - **Exact names only, not your apex.** A CAA record on `example.com` applies to
   every name below it that has no CAA record of its own, and would block the
   certs of your website and other services.
