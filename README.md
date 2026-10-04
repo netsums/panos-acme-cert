@@ -66,8 +66,8 @@ to 5a against Panorama, then continue with
 
 ## Checklist
 
-Print this, or tick it off as you follow the steps below. **(A)** / **(B)**
-marks items that depend on your mgmt choice ([see below](#choose-how-the-box-will-trust-mgmt)).
+Every step below, in order. GitHub can't tick these boxes, so print the list
+or copy it into your own notes to track progress. **(A)** / **(B)** marks items that depend on your mgmt choice ([see below](#choose-how-the-box-will-trust-mgmt)).
 
 **Box prep**
 - [ ] Tools installed, `acmesh` user created (no password, no sudo)
