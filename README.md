@@ -265,13 +265,13 @@ Paste **one** of the two variants.
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --staging --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER"
+acme.sh --issue --staging --dns dns_cf -d "$CERT" -d "$FW" --always-force-new-domain-key --challenge-alias "$BURNER"
 ```
 
 Ended with `Cert success`? Then the real one, in the same shell:
 
 ```bash
-acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --challenge-alias "$BURNER" --force
+acme.sh --issue --dns dns_cf -d "$CERT" -d "$FW" --always-force-new-domain-key --challenge-alias "$BURNER" --force
 unset CF_Token
 acme.sh --list    # CA column: LetsEncrypt.org. LetsEncrypt.org_test = still the staging cert
 ```
@@ -281,11 +281,11 @@ acme.sh --list    # CA column: LetsEncrypt.org. LetsEncrypt.org_test = still the
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --staging --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
+acme.sh --issue --staging --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
 ```
 
 ```bash
-acme.sh --issue --dns dns_cf -d "$CERT" --challenge-alias "$BURNER" --force
+acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER" --force
 unset CF_Token
 acme.sh --list
 ```
@@ -506,7 +506,7 @@ _acme-challenge.panorama.example.com.  CNAME  _acme-challenge.burner-domain.net.
 PANO=panorama.example.com                        # same as $FW
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d "$PANO" --challenge-alias "$BURNER"
+acme.sh --issue --dns dns_cf -d "$PANO" --always-force-new-domain-key --challenge-alias "$BURNER"
 unset CF_Token
 export PANOS_HOST="$PANO" PANOS_USER="$FWUSER" PANOS_KEY
 acme.sh --deploy -d "$PANO" --deploy-hook panos --ecc "${INSECURE[@]}"
@@ -535,7 +535,7 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d "$CERT" --challenge-alias "$BURNER"
+acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
 unset CF_Token
 PANOS_TEMPLATE="GP-Template" PANOS_TEMPLATE_STACK="GP-Stack" \
   acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
@@ -579,7 +579,7 @@ _acme-challenge.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d '*.fw.example.com' --challenge-alias "$BURNER"
+acme.sh --issue --dns dns_cf -d '*.fw.example.com' --always-force-new-domain-key --challenge-alias "$BURNER"
 unset CF_Token
 PANOS_TEMPLATE="FW-Mgmt-Template" PANOS_CERTNAME="fw-mgmt-wildcard" \
   acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
@@ -612,7 +612,7 @@ _acme-challenge.fw02.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 for FWN in fw01 fw02 fw03; do
-  acme.sh --issue --dns dns_cf -d "$FWN.fw.example.com" --challenge-alias "$BURNER" \
+  acme.sh --issue --dns dns_cf -d "$FWN.fw.example.com" --always-force-new-domain-key --challenge-alias "$BURNER" \
   && PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt" \
      acme.sh --deploy -d "$FWN.fw.example.com" --deploy-hook panos --ecc
 done
