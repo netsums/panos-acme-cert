@@ -101,7 +101,7 @@ or copy it into your own notes to track progress. **(A)** / **(B)** marks items 
 **Hands-off check**
 - [ ] Deploy works *without* `--insecure`
 - [ ] Renewal notifications go to a mailbox someone reads
-- [ ] Calendar reminder at 80 days in case everything else fails
+- [ ] External monitoring (e.g. CheckMK) alerts on the certificate expiry date the firewall serves
 - [ ] *(Optional)* CAA records lock issuance to your account
 
 ---
