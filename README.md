@@ -329,10 +329,17 @@ echo | openssl s_client -connect "$FW:443" -servername "$FW" 2>/dev/null \
 openssl x509 -in fw-mgmt.pem -noout -subject -fingerprint -sha256
 ```
 
-Compare it with the real one: on the firewall, **Device > Certificate
-Management > Certificates**, export the cert used by mgmt, then run
-`openssl x509 -in <exported file> -noout -fingerprint -sha256` on it. **Only
-if they match**, pin it:
+Compare it with the real one, taken from the firewall itself:
+
+- **Mgmt uses a cert you created or imported:** **Device > Certificate
+  Management > Certificates**, export it, then run
+  `openssl x509 -in <exported file> -noout -fingerprint -sha256` on it.
+- **Mgmt still uses the factory-default cert:** it usually isn't in that list.
+  Open the firewall's web UI from your admin PC, click the padlock, and read
+  the certificate's SHA-256 fingerprint there.
+
+The whole value must match. If it doesn't, stop: something is between the box
+and the firewall. **Only if they match**, pin it:
 
 ```bash
 PIN="sha256//$(openssl x509 -in fw-mgmt.pem -pubkey -noout \
@@ -489,6 +496,8 @@ then add `--force` to the real run.
      - Mgmt SSL/TLS Service Profile set from a shared template (3a) and from a device template (3b)
        is applied on the firewalls after the push.
      - Panorama HA: does each Panorama peer need its own mgmt cert?
+     - Step 4: does the factory-default mgmt cert appear in Device > Certificate Management >
+       Certificates? If it does, the "usually isn't in that list" wording can go.
      - SSL Inbound Inspection via Panorama: can a decryption rule in a device group select a
        certificate that lives in a template? -->
 
