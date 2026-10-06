@@ -86,6 +86,7 @@ or copy it into your own notes to track progress. **(A)** / **(B)** marks items 
 **acme.sh box**
 - [ ] acme.sh installed as `acmesh`, default CA set to Let's Encrypt
 - [ ] Certificate issued: GlobalProtect name, **(A)** + mgmt FQDN
+- [ ] *(Optional)* CAA records lock issuance to your account
 - [ ] **(B)** Internal root CA trusted by the box
 - [ ] Mgmt identity checked (trusted cert, or fingerprint verified)
 - [ ] API key generated, password discarded
@@ -102,7 +103,6 @@ or copy it into your own notes to track progress. **(A)** / **(B)** marks items 
 - [ ] Deploy works *without* `--insecure`
 - [ ] Renewal notifications go to a mailbox someone reads
 - [ ] Calendar reminder at 80 days in case everything else fails
-- [ ] *(Optional)* CAA records lock issuance to your account
 
 ---
 
@@ -248,8 +248,36 @@ dig +short CNAME "_acme-challenge.$CERT"
 dig +short CNAME "_acme-challenge.$FW"     # (A) only
 ```
 
-Issue (Cloudflare shown; any [acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works),
-in two runs:
+**Give acme.sh the burner zone** (Cloudflare shown; any
+[acme.sh DNS API](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) works,
+with its own variable names).
+
+First the zone ID: in Cloudflare, the burner domain's **Overview** page, on the
+right, *Copy zone ID*. It isn't a secret, so it's read without `-s`. With it,
+acme.sh knows which zone to write to, so the token needs nothing beyond
+**Zone > DNS > Edit** on the burner zone. Without it, acme.sh has to look the
+zone up by name, which also needs **Zone > Zone > Read** on the token.
+
+```bash
+read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
+```
+
+Then the token: **My Profile > API Tokens > Create Token**, template **Edit
+zone DNS**. Give it a name and, under *Zone Resources*, select only the burner
+zone. An expiry date is optional, but then replace the token before it
+expires, or the next renewal fails. Check the summary, create it, copy it.
+
+```bash
+read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
+```
+
+`read -s` puts the token in the `CF_Token` variable without showing it on
+screen or saving it in shell history. `export` hands it to acme.sh, whose
+Cloudflare module reads exactly that variable name. acme.sh saves the token
+and zone ID for renewals (see [Where the credentials live](#where-the-credentials-live)),
+which is why the token must only be able to edit the burner zone.
+
+**Issue**, in the same shell, in two runs:
 
 1. **Test against staging.** Let's Encrypt's test server runs the same checks
    (CNAMEs, token, challenge alias) without the production rate limits. Its
@@ -263,8 +291,6 @@ Paste **one** of the two variants.
 **(A)** GlobalProtect name + mgmt name on the cert:
 
 ```bash
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --staging --dns dns_cf -d "$CERT" -d "$FW" --always-force-new-domain-key --challenge-alias "$BURNER"
 ```
 
@@ -279,8 +305,6 @@ acme.sh --list    # CA column: LetsEncrypt.org. LetsEncrypt.org_test = still the
 **(B)** GlobalProtect name only: the same two runs, without `-d "$FW"`:
 
 ```bash
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --staging --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
 ```
 
@@ -290,15 +314,62 @@ unset CF_Token
 acme.sh --list
 ```
 
-`read -s` puts the token in the `CF_Token` variable without showing it on
-screen or saving it in shell history. `export` hands it to acme.sh, whose
-Cloudflare module reads exactly that variable name. The zone ID isn't a
-secret, so it's read without `-s`; find it on the burner zone's Overview page,
-under API. `CF_Zone_ID` tells acme.sh which zone to write to, so the user token needs nothing beyond
-**Zone > DNS > Edit** on the burner zone. Without it, acme.sh has to look the
-zone up by name, which also needs **Zone > Zone > Read** on the token. acme.sh then
-saves the token and zone ID for renewals (see [Where the credentials live](#where-the-credentials-live)),
-which is why the token must only be able to edit the burner zone.
+### Optional: lock issuance to your account (CAA)
+
+A CAA record tells every CA which CA, and which account, may issue for a name.
+With it, a stolen burner token alone is useless: the thief's ACME account isn't
+yours, so Let's Encrypt refuses.
+
+Get your account URL (production, not staging):
+
+```bash
+grep ACCOUNT_URL ~/.acme.sh/ca/acme-v02.api.letsencrypt.org/directory/ca.conf
+```
+
+In your **real** zone, one record per name on your certs, with that URL:
+
+```
+vpn.example.com.      CAA 0 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789; validationmethods=dns-01"
+fw-mgmt.example.com.  CAA 0 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789; validationmethods=dns-01"
+```
+
+For a wildcard like `*.fw.example.com`, put the record on `fw.example.com`. It
+then covers the wildcard and every name below it.
+
+Check what's published:
+
+```bash
+dig +short CAA "$CERT"
+dig +short CAA "$FW"       # (A) only
+```
+
+You should see your record. If your real zone is on Cloudflare with Universal
+SSL, Cloudflare also publishes CAA records for its own CAs. None of them may be
+a bare `letsencrypt.org` without `accounturi`, or any Let's Encrypt account can
+issue again.
+
+To test that the record blocks, issue once with a wrong `accounturi` in it.
+Deactivate first, or Let's Encrypt reuses the earlier validation and skips the
+CAA check:
+
+```bash
+acme.sh --deactivate -d "$CERT"
+acme.sh --renew -d "$CERT" --force
+```
+
+That should fail with a CAA error. Put the right URL back, and the same two
+commands should issue again. Each `--force` that succeeds is a real cert, so
+mind the 5 duplicate certs per week.
+
+- **Exact names only, not your apex.** A CAA record on `example.com` applies to
+  every name below it that has no CAA record of its own, and would block the
+  certs of your website and other services.
+- **Add it after your staging tests.** The staging server uses a different
+  account and would be refused.
+- **A name that is a CNAME can't carry a CAA record.** Put it where the CNAME
+  points, or leave that name out.
+- **It covers a leaked token, not a taken-over box.** The box also holds your
+  ACME account key. Keep it small and locked down.
 
 ## Step 4: Check you're really talking to your firewall
 
@@ -331,8 +402,10 @@ openssl x509 -in fw-mgmt.pem -noout -subject -fingerprint -sha256
 
 Compare it with the real one: on the firewall, **Device > Certificate
 Management > Certificates**, export the cert used by mgmt, then run
-`openssl x509 -in <exported file> -noout -fingerprint -sha256` on it. **Only
-if they match**, pin it:
+`openssl x509 -in <exported file> -noout -fingerprint -sha256` on it. If mgmt
+still uses the factory default cert and it isn't in that list, open the
+firewall GUI from your admin PC instead, click the padlock, and read the
+cert's SHA-256 fingerprint there. **Only if they match**, pin it:
 
 ```bash
 PIN="sha256//$(openssl x509 -in fw-mgmt.pem -pubkey -noout \
@@ -421,6 +494,38 @@ clients don't fail with "untrusted certificate".
 - Commit. **Panorama:** make these changes in the template, then commit and
   push to the devices.
 
+## Other uses of the cert
+
+GlobalProtect and mgmt are the common cases, not the only ones. A Let's
+Encrypt cert fits anywhere the firewall is the **TLS server for a public
+name**. Same flow: issue, deploy, bind once.
+
+| Use | Works? | Bind it in |
+|---|---|---|
+| GlobalProtect portal/gateway | Yes | SSL/TLS Service Profile |
+| Mgmt web UI and API | Yes | SSL/TLS Service Profile → Device > Setup > Management |
+| Authentication Portal | Yes | SSL/TLS Service Profile → Device > User Identification > Authentication Portal Settings |
+| SSL Inbound Inspection | Yes, with the same cert and key on the web server | Decryption policy rule, type SSL Inbound Inspection |
+| SSL Forward Proxy | **No.** It needs a CA certificate that signs certs on the fly. No public CA issues one | Keep your internal CA |
+| The firewall authenticating as a TLS client | **No.** Let's Encrypt certs are for servers only; the client-auth EKU was dropped in 2026 | Internal PKI |
+
+**SSL Inbound Inspection.** The firewall needs the web server's certificate and
+private key, so the firewall and the server must get the same cert. Give the
+deploy two hooks: `panos` first, then one for the server (acme.sh ships many,
+e.g. `ssh`). Hooks run in the order given, and if one fails the rest are
+skipped, so the server never gets a cert the firewall doesn't have yet. That's
+also the order Palo Alto recommends: firewall first, then the server.
+
+```bash
+acme.sh --deploy -d www.example.com --deploy-hook panos --deploy-hook ssh --ecc
+```
+
+Each hook reads its own variables on the first deploy, see the acme.sh
+[deploy hooks wiki](https://github.com/acmesh-official/acme.sh/wiki/deployhooks).
+Bind once: select the cert in the decryption rule (PAN-OS 10.2 and later accept
+several certs per rule). With `--always-force-new-domain-key`, firewall and
+server get the new key together at every renewal.
+
 ## Step 7: Make renewals hands-off
 
 **Deploy again, without `--insecure`.** For (A), only after step 6 is
@@ -431,19 +536,6 @@ too:
 ```bash
 curl -sS -o /dev/null --connect-timeout 5 "https://$FW/" \
   && acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
-```
-
-**Get told about failures.** Notifications at the default level cover errors
-and successful renewals, so silence means something is wrong. SMTP example
-(other hooks: mail, Teams, Slack, Telegram, …):
-
-```bash
-export SMTP_FROM=acme@example.com SMTP_TO=you@example.com \
-       SMTP_HOST=smtp.example.com SMTP_SECURE=tls \
-       SMTP_USERNAME=acme@example.com
-read -rsp 'SMTP password: ' SMTP_PASSWORD; echo; export SMTP_PASSWORD
-acme.sh --set-notify --notify-hook smtp
-unset SMTP_PASSWORD
 ```
 
 **Check the cron job and what the firewall serves:**
@@ -464,6 +556,64 @@ echo | openssl s_client -connect "$CERT:443" -servername "$CERT" 2>/dev/null \
 `0` is your certificate, `1` the Let's Encrypt intermediate (e.g. `YE2`), and
 there may be a `2`. If you only see `0`, the intermediate is missing and some
 clients will reject the certificate.
+
+**Get told about failures.** Notifications at the default level cover errors
+and successful renewals, so silence means something is wrong. SMTP example
+(other hooks: mail, Teams, Slack, Telegram, …):
+
+```bash
+export SMTP_FROM=acme@example.com SMTP_TO=you@example.com \
+       SMTP_HOST=smtp.example.com SMTP_SECURE=tls \
+       SMTP_USERNAME=acme@example.com
+read -rsp 'SMTP password: ' SMTP_PASSWORD; echo; export SMTP_PASSWORD
+acme.sh --set-notify --notify-hook smtp
+unset SMTP_PASSWORD
+```
+
+---
+
+## Shorter certificate lifetimes (47 days by 2029)
+
+Public TLS certificates are getting shorter: 200 days maximum since March
+2026, 100 days from March 2027, 47 days from March 2029 (CA/Browser Forum
+ballot SC-081). Let's Encrypt is ahead of that: its default drops from 90 to
+64 days on 10 February 2027, and to 45 days on 16 February 2028.
+
+**You don't need to change anything.** acme.sh asks Let's Encrypt when to
+renew each certificate (ARI) and renews inside that window, so the schedule
+follows the lifetime on its own. What changes is how often the firewall gets
+an import and commit: with 45-day certs, about once a month.
+
+When is the next renewal planned? See the `Renew` column:
+
+```bash
+acme.sh --list
+```
+
+**Optional: pick the lifetime.** With Let's Encrypt you can't request a number
+of days. You pick a profile by adding it to the `--issue` line in step 3:
+
+| Option on `--issue` | Lifetime |
+|---|---|
+| *(none)* | Let's Encrypt default: 90 days, 64 from Feb 2027, 45 from Feb 2028 |
+| `--cert-profile tlsserver` | 45 days now, to test the short lifetime before it's the default |
+
+**Optional: renew a fixed number of days before expiry.** Add e.g.
+`--days -15` to the `--issue` line to renew 15 days before the certificate
+expires. Let's Encrypt can still ask for an earlier renewal when it needs to
+(for example before revoking certificates). Most people should leave this out:
+the default already renews with plenty of margin.
+
+**Recommended: a new private key on every renewal.** By default acme.sh keeps
+the same private key across renewals, so a leaked key stays usable with the
+next cert too. Add `--always-force-new-domain-key` to the `--issue` line, and
+every renewal comes with a fresh key. That's what makes short lifetimes a real
+security gain: a leaked key dies with its cert. The deploy imports cert and key
+together, so the firewall needs nothing extra.
+
+**Already issued?** Run your step 3 production `--issue` line again with the
+new option added (it already has `--force`). That issues a new certificate now. Then deploy it with
+the step 7 deploy command. acme.sh saves the options for all future renewals.
 
 ---
 
@@ -658,85 +808,6 @@ which is why 3a or 3b are the better fit when you have Panorama.
 
 ---
 
-## Other uses of the cert
-
-GlobalProtect and mgmt are the common cases, not the only ones. A Let's
-Encrypt cert fits anywhere the firewall is the **TLS server for a public
-name**. Same flow: issue, deploy, bind once.
-
-| Use | Works? | Bind it in |
-|---|---|---|
-| GlobalProtect portal/gateway | Yes | SSL/TLS Service Profile |
-| Mgmt web UI and API | Yes | SSL/TLS Service Profile → Device > Setup > Management |
-| Authentication Portal | Yes | SSL/TLS Service Profile → Device > User Identification > Authentication Portal Settings |
-| SSL Inbound Inspection | Yes, with the same cert and key on the web server | Decryption policy rule, type SSL Inbound Inspection |
-| SSL Forward Proxy | **No.** It needs a CA certificate that signs certs on the fly. No public CA issues one | Keep your internal CA |
-| The firewall authenticating as a TLS client | **No.** Let's Encrypt certs are for servers only; the client-auth EKU was dropped in 2026 | Internal PKI |
-
-**SSL Inbound Inspection.** The firewall needs the web server's certificate and
-private key, so the firewall and the server must get the same cert. Give the
-deploy two hooks: `panos` first, then one for the server (acme.sh ships many,
-e.g. `ssh`). Hooks run in the order given, and if one fails the rest are
-skipped, so the server never gets a cert the firewall doesn't have yet. That's
-also the order Palo Alto recommends: firewall first, then the server.
-
-```bash
-acme.sh --deploy -d www.example.com --deploy-hook panos --deploy-hook ssh --ecc
-```
-
-Each hook reads its own variables on the first deploy, see the acme.sh
-[deploy hooks wiki](https://github.com/acmesh-official/acme.sh/wiki/deployhooks).
-Bind once: select the cert in the decryption rule (PAN-OS 10.2 and later accept
-several certs per rule). With `--always-force-new-domain-key`, firewall and
-server get the new key together at every renewal.
-
----
-
-## Shorter certificate lifetimes (47 days by 2029)
-
-Public TLS certificates are getting shorter: 200 days maximum since March
-2026, 100 days from March 2027, 47 days from March 2029 (CA/Browser Forum
-ballot SC-081). Let's Encrypt is ahead of that: its default drops from 90 to
-64 days on 10 February 2027, and to 45 days on 16 February 2028.
-
-**You don't need to change anything.** acme.sh asks Let's Encrypt when to
-renew each certificate (ARI) and renews inside that window, so the schedule
-follows the lifetime on its own. What changes is how often the firewall gets
-an import and commit: with 45-day certs, about once a month.
-
-When is the next renewal planned? See the `Renew` column:
-
-```bash
-acme.sh --list
-```
-
-**Optional: pick the lifetime.** With Let's Encrypt you can't request a number
-of days. You pick a profile by adding it to the `--issue` line in step 3:
-
-| Option on `--issue` | Lifetime |
-|---|---|
-| *(none)* | Let's Encrypt default: 90 days, 64 from Feb 2027, 45 from Feb 2028 |
-| `--cert-profile tlsserver` | 45 days now, to test the short lifetime before it's the default |
-
-**Optional: renew a fixed number of days before expiry.** Add e.g.
-`--days -15` to the `--issue` line to renew 15 days before the certificate
-expires. Let's Encrypt can still ask for an earlier renewal when it needs to
-(for example before revoking certificates). Most people should leave this out:
-the default already renews with plenty of margin.
-
-**Recommended: a new private key on every renewal.** By default acme.sh keeps
-the same private key across renewals, so a leaked key stays usable with the
-next cert too. Add `--always-force-new-domain-key` to the `--issue` line, and
-every renewal comes with a fresh key. That's what makes short lifetimes a real
-security gain: a leaked key dies with its cert. The deploy imports cert and key
-together, so the firewall needs nothing extra.
-
-**Already issued?** Run your step 3 production `--issue` line again with the
-new option added (it already has `--force`). That issues a new certificate now. Then deploy it with
-the step 7 deploy command. acme.sh saves the options for all future renewals.
-
----
-
 ## Where the credentials live
 
 - **Firewall password:** used once in step 5a, never stored.
@@ -758,62 +829,6 @@ Keep it small: a dedicated box, the `acmesh` user, `chmod 700 ~/.acme.sh`, mgmt 
 IPs limited to that box. If you set an API key lifetime (Device > Setup >
 Management > Authentication Settings), renewals fail when the key expires.
 Before then, repeat 0b, 0c, 4 (it should say `TRUSTED` by now), 5a and 5b.
-
-## Optional: lock issuance to your account (CAA)
-
-A CAA record tells every CA which CA, and which account, may issue for a name.
-With it, a stolen burner token alone is useless: the thief's ACME account isn't
-yours, so Let's Encrypt refuses.
-
-Get your account URL (production, not staging):
-
-```bash
-grep ACCOUNT_URL ~/.acme.sh/ca/acme-v02.api.letsencrypt.org/directory/ca.conf
-```
-
-In your **real** zone, one record per name on your certs, with that URL:
-
-```
-vpn.example.com.      CAA 0 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789; validationmethods=dns-01"
-fw-mgmt.example.com.  CAA 0 issue "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123456789; validationmethods=dns-01"
-```
-
-For a wildcard like `*.fw.example.com`, put the record on `fw.example.com`. It
-then covers the wildcard and every name below it.
-
-Check what's published:
-
-```bash
-dig +short CAA vpn.example.com
-```
-
-You should see your record. If your real zone is on Cloudflare with Universal
-SSL, Cloudflare also publishes CAA records for its own CAs. None of them may be
-a bare `letsencrypt.org` without `accounturi`, or any Let's Encrypt account can
-issue again.
-
-To test that the record blocks, issue once with a wrong `accounturi` in it.
-Deactivate first, or Let's Encrypt reuses the earlier validation and skips the
-CAA check:
-
-```bash
-acme.sh --deactivate -d vpn.example.com
-acme.sh --renew -d vpn.example.com --force
-```
-
-That should fail with a CAA error. Put the right URL back, and the same two
-commands should issue again. Each `--force` that succeeds is a real cert, so
-mind the 5 duplicate certs per week.
-
-- **Exact names only, not your apex.** A CAA record on `example.com` applies to
-  every name below it that has no CAA record of its own, and would block the
-  certs of your website and other services.
-- **Add it after your staging tests.** The staging server uses a different
-  account and would be refused.
-- **A name that is a CNAME can't carry a CAA record.** Put it where the CNAME
-  points, or leave that name out.
-- **It covers a leaked token, not a taken-over box.** The box also holds your
-  ACME account key. Keep it small and locked down.
 
 ## Troubleshooting
 
