@@ -59,8 +59,9 @@ Two rules cover all four:
   firewall keeps serving the old one until it expires.
 
 **Scenarios 1 and 2:** follow steps 0 to 7. **Scenarios 3 and 4:** do steps 0
-to 5a against Panorama, then continue with
-[Panorama and many firewalls](#panorama-and-many-firewalls).
+to 5a against Panorama, but in step 3 stop after the Cloudflare token: the
+certs are issued in [Panorama and many firewalls](#panorama-and-many-firewalls),
+where you continue.
 
 ---
 
@@ -102,7 +103,7 @@ or copy it into your own notes to track progress. **(A)** / **(B)** marks items 
 **Hands-off check**
 - [ ] Deploy works *without* `--insecure`
 - [ ] Renewal notifications go to a mailbox someone reads
-- [ ] Calendar reminder at 80 days in case everything else fails
+- [ ] External monitoring (e.g. CheckMK) alerts on the certificate expiry date the firewall serves
 
 ---
 
@@ -343,10 +344,11 @@ dig +short CAA "$CERT"
 dig +short CAA "$FW"       # (A) only
 ```
 
-You should see your record. If your real zone is on Cloudflare with Universal
-SSL, Cloudflare also publishes CAA records for its own CAs. None of them may be
-a bare `letsencrypt.org` without `accounturi`, or any Let's Encrypt account can
-issue again.
+You should see your record, and no `letsencrypt.org` line without `accounturi`.
+If your real zone is on Cloudflare with Universal SSL, Cloudflare can add CAA
+records for its own CAs, including a bare `letsencrypt.org`. They don't show in
+the dashboard, only in `dig`. If one is there, any Let's Encrypt account can
+issue and the lock does nothing.
 
 To test that the record blocks, issue once with a wrong `accounturi` in it.
 Deactivate first, or Let's Encrypt reuses the earlier validation and skips the
@@ -414,7 +416,7 @@ TLS=(-k --pinnedpubkey "$PIN"); INSECURE=(--insecure)
 ```
 
 From here on, curl refuses to send anything unless the firewall presents
-exactly that key.
+exactly that key. (acme.sh doesn't use the pin, see step 5b.)
 
 ## Panorama only: before step 5
 
@@ -472,6 +474,11 @@ unset PANOS_KEY
 `${INSECURE[@]}` is `--insecure` only if mgmt wasn't trusted in step 4 (you
 checked its identity by fingerprint instead). It applies to this run only and
 isn't saved. acme.sh stores host, user and key for renewals.
+
+`--insecure` means acme.sh doesn't check the firewall's identity on this one
+run; your pin from step 4 only protected the keygen. Run 5b right after
+step 4, so the check you just did still holds. From step 7 on, every deploy
+is verified.
 
 The cert appears under **Device > Certificate Management > Certificates**
 (Panorama: in the template, or under **Panorama > Certificate Management >
@@ -604,16 +611,18 @@ expires. Let's Encrypt can still ask for an earlier renewal when it needs to
 (for example before revoking certificates). Most people should leave this out:
 the default already renews with plenty of margin.
 
-**Recommended: a new private key on every renewal.** By default acme.sh keeps
-the same private key across renewals, so a leaked key stays usable with the
-next cert too. Add `--always-force-new-domain-key` to the `--issue` line, and
-every renewal comes with a fresh key. That's what makes short lifetimes a real
-security gain: a leaked key dies with its cert. The deploy imports cert and key
-together, so the firewall needs nothing extra.
+**A new private key on every renewal.** By default acme.sh keeps the same
+private key across renewals, so a leaked key stays usable with the next cert
+too. That's why every `--issue` line in this guide has
+`--always-force-new-domain-key`: every renewal comes with a fresh key. That's
+what makes short lifetimes a real security gain: a leaked key dies with its
+cert. The deploy imports cert and key together, so the firewall needs nothing
+extra.
 
-**Already issued?** Run your step 3 production `--issue` line again with the
-new option added (it already has `--force`). That issues a new certificate now. Then deploy it with
-the step 7 deploy command. acme.sh saves the options for all future renewals.
+**Issued without it?** Run your step 3 production `--issue` line again with
+the option added (it already has `--force`). That issues a new certificate
+now. Then deploy it with the step 7 deploy command. acme.sh saves the options
+for all future renewals.
 
 ---
 
@@ -624,7 +633,8 @@ Panorama), one mgmt to trust (Panorama's), and the firewalls get everything
 with the normal template push. The firewalls need no API admin.
 
 Do steps 0 to 5a once, with `$FW` set to Panorama's mgmt FQDN and the admin
-from step 1 created on Panorama. Keep that shell open: every certificate below
+from step 1 created on Panorama. In step 3, stop after the Cloudflare token:
+don't issue there, each cert is issued below. Keep that shell open: every certificate below
 is deployed with the same Panorama API key, so `$PANOS_KEY` must stay set until
 the last one is done.
 
@@ -735,8 +745,9 @@ PANOS_TEMPLATE="FW-Mgmt-Template" PANOS_CERTNAME="fw-mgmt-wildcard" \
   acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
 ```
 
-`PANOS_CERTNAME` is required: the default object name is the domain, and
-PAN-OS doesn't accept `*` in a name.
+`PANOS_CERTNAME` gives the object a readable name. Without it, the hook
+replaces the `*` and names it `WILDCARD_.fw.example.com`, which breaks
+Panorama's 31-character limit on longer domains.
 
 Bind once, in that template: SSL/TLS Service Profile with this cert →
 **Device > Setup > Management > General Settings** → that profile. Commit and
@@ -744,8 +755,9 @@ push. Every firewall with that template in its stack then presents the cert
 for its `fwNN.fw.example.com` name.
 
 If one firewall is compromised, the shared key is compromised everywhere.
-Issue a new key and deploy it: run the `--issue` line again with `--force`
-added, then the deploy line. A plain `--renew` keeps the old key.
+Renew now: `acme.sh --renew -d '*.fw.example.com' --force`. The saved
+`--always-force-new-domain-key` makes a new key, and the saved deploy imports
+it into the template.
 
 **3b. One cert per firewall, in device templates**
 
@@ -828,7 +840,10 @@ read your config.
 Keep it small: a dedicated box, the `acmesh` user, `chmod 700 ~/.acme.sh`, mgmt Permitted
 IPs limited to that box. If you set an API key lifetime (Device > Setup >
 Management > Authentication Settings), renewals fail when the key expires.
-Before then, repeat 0b, 0c, 4 (it should say `TRUSTED` by now), 5a and 5b.
+Before then, set `BOXUSER` and repeat 0b, 0c, 4 (it should say `TRUSTED` by
+now), 5a and 5b. acme.sh saves the key separately for each cert, so with
+several certs (Panorama), run each cert's deploy line once with the new key
+exported, not just the one for `$CERT`.
 
 ## Troubleshooting
 
@@ -846,7 +861,7 @@ Before then, repeat 0b, 0c, 4 (it should say `TRUSTED` by now), 5a and 5b.
 | Step 7 deploy fails with a TLS error | (A) Mgmt isn't presenting the new cert yet, or `$FW` isn't a name on it: redo step 6. (B) The box no longer trusts the mgmt cert: see the (B) prerequisite |
 | Users still see the old cert | The SSL/TLS Service Profile points at a different cert object |
 | Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` from an earlier `export` was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
-| Wildcard deploy fails on the object name | Set `PANOS_CERTNAME`: PAN-OS doesn't accept `*` in a name |
+| Deploy to Panorama fails on the object name | Name longer than 31 characters (wildcards become `WILDCARD_.<domain>`). Set a shorter `PANOS_CERTNAME` |
 | Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or set `PANOS_TEMPLATE_STACK` (role needs Operational Requests) |
 | Issue fails with a CAA error | CAA `accounturi` doesn't match: staging account, or a different acme.sh install |
 | `Domains not changed` … `Skipping` after the staging test | The real run needs `--force` (step 3). `acme.sh --list` shows `LetsEncrypt.org_test` in the CA column while it's still the staging cert |
