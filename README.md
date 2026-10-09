@@ -22,8 +22,8 @@ through its API.
 
 ## Watch the videos
 
-- **Video 1: one firewall** (scenarios 1 and 2): `VIDEO_1_URL`
-- **Video 2: Panorama and many firewalls** (scenarios 3 and 4): `VIDEO_2_URL`
+- **Video 1: one firewall** (scenarios 1 and 2): https://youtu.be/UmRaHxGueyY
+- **Video 2: Panorama and many firewalls** (scenarios 3 and 4): Video will be available soon!
 
 ---
 
