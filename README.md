@@ -20,20 +20,10 @@ through its API.
 
 ---
 
-## How it works
+## Watch the videos
 
-```
-acme.sh (Linux box) ──DNS-01──▶ Let's Encrypt
-        │                         ▲
-        │                         └─ _acme-challenge.vpn.example.com  CNAME ─▶ _acme-challenge.burner-domain.net
-        │                                                             (only the burner zone's DNS token
-        │                                                              lives on the box)
-        └──XML API (API key)──▶ PAN-OS: import cert + key, partial commit
-```
-
-acme.sh renews by cron every ~60 days and re-runs the deploy: import, commit,
-done. The cert object keeps its name, so every SSL/TLS Service Profile that
-uses it picks up the new cert.
+- **Video 1: one firewall** (scenarios 1 and 2): `VIDEO_1_URL`
+- **Video 2: Panorama and many firewalls** (scenarios 3 and 4): `VIDEO_2_URL`
 
 ---
 
@@ -62,48 +52,6 @@ Two rules cover all four:
 to 5a against Panorama, but in step 3 stop after the Cloudflare token: the
 certs are issued in [Panorama and many firewalls](#panorama-and-many-firewalls),
 where you continue.
-
----
-
-## Checklist
-
-Every step below, in order. GitHub can't tick these boxes, so print the list
-or copy it into your own notes to track progress. **(A)** / **(B)** marks items that depend on your mgmt choice ([see below](#choose-how-the-box-will-trust-mgmt)).
-
-**Box prep**
-- [ ] Tools installed, `acmesh` user created (no password, no sudo)
-
-**Firewall**
-- [ ] Admin Role `acme-deploy`: XML API **Import** + **Commit** only, everything else off
-- [ ] Administrator (e.g. `acme`) with that role and a long random password
-- [ ] acme.sh box's IP added to mgmt *Permitted IP Addresses*, if list not empty
-- [ ] Mgmt reachable from the box by an FQDN (DNS or `/etc/hosts`)
-
-**DNS**
-- [ ] Throwaway ("burner") domain on a DNS provider [acme.sh](https://github.com/acmesh-official/acme.sh/wiki/dnsapi) supports 
-- [ ] API token scoped to the burner zone only (Cloudflare: a **user token** from *My Profile > API Tokens*, permission **Zone > DNS > Edit**, plus the zone's Zone ID)
-- [ ] `_acme-challenge` CNAME for **each** name on the cert → `_acme-challenge.<burner>`
-
-**acme.sh box**
-- [ ] acme.sh installed as `acmesh`, default CA set to Let's Encrypt
-- [ ] Certificate issued: GlobalProtect name, **(A)** + mgmt FQDN
-- [ ] *(Optional)* CAA records lock issuance to your account
-- [ ] **(B)** Internal root CA trusted by the box
-- [ ] Mgmt identity checked (trusted cert, or fingerprint verified)
-- [ ] API key generated, password discarded
-- [ ] *(Panorama)* Panorama's own mgmt cert deployed first, without template variables
-- [ ] *(Panorama)* Template variables passed in front of each template deploy, not exported
-- [ ] First deploy done
-
-**Firewall, once**
-- [ ] Cert bound to the GlobalProtect portal/gateway SSL/TLS Service Profile
-- [ ] **(A)** Cert bound to the mgmt SSL/TLS Service Profile
-- [ ] Commit (*Panorama:* commit and push)
-
-**Hands-off check**
-- [ ] Deploy works *without* `--insecure`
-- [ ] Renewal notifications go to a mailbox someone reads
-- [ ] External monitoring (e.g. CheckMK) alerts on the certificate expiry date the firewall serves
 
 ---
 
@@ -198,7 +146,7 @@ FWUSER=acme                   # restricted admin you create in step 1
 BURNER=burner-domain.net      # throwaway domain for DNS validation
 ```
 
-## Step 1: Firewall — role and admin
+## Step 1: Firewall admin user configuration
 
 **Device > Admin Roles > Add** → name `acme-deploy`
 
@@ -576,6 +524,9 @@ read -rsp 'SMTP password: ' SMTP_PASSWORD; echo; export SMTP_PASSWORD
 acme.sh --set-notify --notify-hook smtp
 unset SMTP_PASSWORD
 ```
+
+Mail can fail silently too, so also have your monitoring (e.g. CheckMK) alert
+on the expiry date the firewall actually serves.
 
 ---
 
