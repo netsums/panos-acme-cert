@@ -24,6 +24,7 @@ through its API.
 
 - **Video 1: one firewall** (scenarios 1 and 2): https://youtu.be/UmRaHxGueyY
 - **Video 2: Panorama and many firewalls** (scenarios 3 and 4): Video will be available soon!
+  The guide for it is [PANORAMA.md](PANORAMA.md).
 
 ---
 
@@ -48,10 +49,8 @@ Two rules cover all four:
   with normal TLS checks. If that fails, the new cert stays on the box and the
   firewall keeps serving the old one until it expires.
 
-**Scenarios 1 and 2:** follow steps 0 to 7. **Scenarios 3 and 4:** do steps 0
-to 5a against Panorama, but in step 3 stop after the Cloudflare token: the
-certs are issued in [Panorama and many firewalls](#panorama-and-many-firewalls),
-where you continue.
+**Scenarios 1 and 2:** follow steps 0 to 7 below. **Scenarios 3 and 4:**
+follow [PANORAMA.md](PANORAMA.md), the guide for Panorama and many firewalls.
 
 ---
 
@@ -77,10 +76,6 @@ Pick one:
   Bind it to mgmt, and trust the firewall's CA cert on the box as below.
 - **Leaving mgmt on its default self-signed cert** works for the first
   deploy only. Every renewal fails. That's not hands-off.
-- **Panorama:** acme.sh only talks to Panorama, so only Panorama's mgmt must
-  be trusted, not the firewalls'. Give Panorama's mgmt its own Let's Encrypt
-  cert (deployed to Panorama itself, without a template, see
-  [Panorama and many firewalls](#panorama-and-many-firewalls)), or use (B).
 
 **(B) prerequisite:** issuing the internal mgmt cert is up to your PKI and not
 part of this guide, but the acme.sh box must trust the root CA that signed it.
@@ -141,7 +136,6 @@ again, then repeat 0b and 0c.
 ```bash
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
 FW=fw-mgmt.example.com        # mgmt FQDN: public (A) or internal (B)
-                              # Panorama: Panorama's mgmt FQDN, not the firewall's
 FWUSER=acme                   # restricted admin you create in step 1
 BURNER=burner-domain.net      # throwaway domain for DNS validation
 ```
@@ -153,7 +147,7 @@ BURNER=burner-domain.net      # throwaway domain for DNS validation
 | Tab | Setting |
 |---|---|
 | Web UI | disable **everything** |
-| XML API | disable everything, then enable **Import** and **Commit** only. Panorama: add **Operational Requests** only if acme.sh should push the configuration itself |
+| XML API | disable everything, then enable **Import** and **Commit** only |
 | Command Line | None |
 | REST API | disable everything |
 
@@ -165,9 +159,6 @@ once, in step 5).
 
 **Device > Setup > Interfaces > Management** → if *Permitted IP Addresses*
 has entries, add the acme.sh box's IP (an empty list allows any IP). Commit.
-
-On **Panorama**, create the role (type *Panorama*) and admin the same way,
-under **Panorama > Admin Roles** and **Panorama > Administrators**.
 
 ## Step 2: Install acme.sh
 
@@ -366,30 +357,6 @@ TLS=(-k --pinnedpubkey "$PIN"); INSECURE=(--insecure)
 From here on, curl refuses to send anything unless the firewall presents
 exactly that key. (acme.sh doesn't use the pin, see step 5b.)
 
-## Panorama only: before step 5
-
-Where the cert lands depends on `PANOS_TEMPLATE`:
-
-- **Not set:** the hook imports into the device `PANOS_HOST` points to. With
-  Panorama, that's Panorama's own certificate store, for Panorama's mgmt.
-- **Set:** the hook imports into that template, and the firewalls get the cert
-  with the template push.
-
-Do Panorama's own mgmt cert first, with no template variables at all. Then the
-template certs, as shown in [Panorama and many firewalls](#panorama-and-many-firewalls).
-These variables are available:
-
-```bash
-PANOS_TEMPLATE="my-template"         # template to import into
-PANOS_TEMPLATE_STACK="my-stack"      # optional: also push the stack (role needs Operational Requests)
-PANOS_CERTNAME="gp-le"               # optional: object name, Panorama limits names to 31 chars
-```
-
-Put them **in front of the deploy command**, not `export`. acme.sh saves every
-`PANOS_*` variable it finds in the environment into the config of the cert
-it's deploying. An exported `PANOS_TEMPLATE` is still set when you deploy the
-next cert, so that one lands in the template too.
-
 ## Step 5: API key and first deploy
 
 **5a. Generate the API key.** The password is read hidden and passed to curl
@@ -428,11 +395,8 @@ run; your pin from step 4 only protected the keygen. Run 5b right after
 step 4, so the check you just did still holds. From step 7 on, every deploy
 is verified.
 
-The cert appears under **Device > Certificate Management > Certificates**
-(Panorama: in the template, or under **Panorama > Certificate Management >
-Certificates** when no template was set), named after `$CERT` or
-`$PANOS_CERTNAME`. The
-hook commits only the `$FWUSER` admin's changes.
+The cert appears under **Device > Certificate Management > Certificates**,
+named after `$CERT`. The hook commits only the `$FWUSER` admin's changes.
 
 The hook uploads acme.sh's full-chain file: your certificate **plus** the
 Let's Encrypt intermediate. The firewall serves the complete chain, so
@@ -446,8 +410,7 @@ clients don't fail with "untrusted certificate".
 - **Mgmt, (A) only:** create an SSL/TLS Service Profile with the same cert →
   **Device > Setup > Management > General Settings** → SSL/TLS Service
   Profile. Mgmt now presents a publicly trusted cert that matches `$FW`.
-- Commit. **Panorama:** make these changes in the template, then commit and
-  push to the devices.
+- Commit.
 
 ## Other uses of the cert
 
@@ -579,195 +542,8 @@ for all future renewals.
 
 ## Panorama and many firewalls
 
-Scenarios 3 and 4. acme.sh talks **only to Panorama**: one API admin (on
-Panorama), one mgmt to trust (Panorama's), and the firewalls get everything
-with the normal template push. The firewalls need no API admin.
-
-Do steps 0 to 5a once, with `$FW` set to Panorama's mgmt FQDN and the admin
-from step 1 created on Panorama. In step 3, stop after the Cloudflare token:
-don't issue there, each cert is issued below. Keep that shell open: every certificate below
-is deployed with the same Panorama API key, so `$PANOS_KEY` must stay set until
-the last one is done.
-
-The `--issue` lines below are the production runs. Test each new name with
-`--staging` first, as in [step 3](#step-3-dns-delegation-and-issuing), and
-then add `--force` to the real run.
-
-<!-- TODO Ricardo, verify in the lab before merging:
-     - Panorama role type "Panorama" with XML API Import + Commit (Web UI all off) can import into
-       Panorama's own store AND into templates. Palo Alto docs say custom roles committing template
-       changes may need read-write on Panorama > Templates.
-     - Mgmt SSL/TLS Service Profile set from a shared template (3a) and from a device template (3b)
-       is applied on the firewalls after the push.
-     - Panorama HA: does each Panorama peer need its own mgmt cert?
-     - SSL Inbound Inspection via Panorama: can a decryption rule in a device group select a
-       certificate that lives in a template? -->
-
-
-### 1. Panorama's own mgmt (always first)
-
-This cert makes every later deploy trusted. No template variables: the hook
-imports into Panorama itself.
-
-```
-_acme-challenge.panorama.example.com.  CNAME  _acme-challenge.burner-domain.net.
-```
-
-```bash
-PANO=panorama.example.com                        # same as $FW
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d "$PANO" --always-force-new-domain-key --challenge-alias "$BURNER"
-unset CF_Token
-export PANOS_HOST="$PANO" PANOS_USER="$FWUSER" PANOS_KEY
-acme.sh --deploy -d "$PANO" --deploy-hook panos --ecc "${INSECURE[@]}"
-```
-
-Bind once: **Panorama > Certificate Management > SSL/TLS Service Profile** →
-new profile with this cert → **Panorama > Setup > Management > General
-Settings** → SSL/TLS Service Profile. Commit to Panorama. Then prove the box
-now trusts Panorama, and drop `--insecure` for good:
-
-```bash
-curl -sS -o /dev/null --connect-timeout 5 "https://$PANO/" \
-  && acme.sh --deploy -d "$PANO" --deploy-hook panos --ecc \
-  && INSECURE=()
-```
-
-Scenario 3 without this cert only works if Panorama's mgmt is trusted another
-way, i.e. **(B)**.
-
-### 2. GlobalProtect, into its template
-
-```
-_acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
-```
-
-```bash
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
-unset CF_Token
-PANOS_TEMPLATE="GP-Template" PANOS_TEMPLATE_STACK="GP-Stack" \
-  acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
-```
-
-`PANOS_TEMPLATE_STACK` is optional. With it, acme.sh also pushes the stack to
-the firewalls (the role needs **Operational Requests**). Without it, acme.sh
-only commits to Panorama and your next regular push delivers the cert, which
-fits change windows. acme.sh renews roughly the last third of a cert's
-lifetime early: about a month with 90-day certs, about two weeks with 45-day
-certs. Your push schedule must fit inside that.
-
-Bind once, **in the template**: SSL/TLS Service Profile with this cert, used by
-the portal and gateway. Commit and push.
-
-### 3. Mgmt of every firewall
-
-Pick one:
-
-| | How | Private keys | Box talks to | Good for |
-|---|---|---|---|---|
-| **3a** | One wildcard cert, in a shared template | One key on every firewall | Panorama | Simplest. Hides firewall names from CT logs |
-| **3b** | One cert per firewall, each into its own device template | One key per firewall | Panorama | Per-device keys, when every firewall has its own template in its stack |
-| **3c** | One cert per firewall, deployed to each firewall directly | One key per firewall | Every firewall | No per-device templates |
-
-Not recommended: one cert listing every firewall name. It has the shared key of
-3a, and publishes every firewall name in the Certificate Transparency logs.
-
-All three need firewall mgmt names in a public domain you own, e.g.
-`fw01.fw.example.com`. They only have to resolve internally; only the
-`_acme-challenge` CNAMEs must be public. Names like `fw01.corp.local` can't get
-a public cert: use (B) with an internal ACME CA (see
-[Enterprise notes](#enterprise-notes)).
-
-**3a. Wildcard in a shared template**
-
-```
-_acme-challenge.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
-```
-
-```bash
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-acme.sh --issue --dns dns_cf -d '*.fw.example.com' --always-force-new-domain-key --challenge-alias "$BURNER"
-unset CF_Token
-PANOS_TEMPLATE="FW-Mgmt-Template" PANOS_CERTNAME="fw-mgmt-wildcard" \
-  acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
-```
-
-`PANOS_CERTNAME` gives the object a readable name. Without it, the hook
-replaces the `*` and names it `WILDCARD_.fw.example.com`, which breaks
-Panorama's 31-character limit on longer domains.
-
-Bind once, in that template: SSL/TLS Service Profile with this cert →
-**Device > Setup > Management > General Settings** → that profile. Commit and
-push. Every firewall with that template in its stack then presents the cert
-for its `fwNN.fw.example.com` name.
-
-If one firewall is compromised, the shared key is compromised everywhere.
-Renew now: `acme.sh --renew -d '*.fw.example.com' --force`. The saved
-`--always-force-new-domain-key` makes a new key, and the saved deploy imports
-it into the template.
-
-**3b. One cert per firewall, in device templates**
-
-Prerequisite: each firewall's template stack contains its own template, named
-`<fw>-device` below. One CNAME per firewall, all pointing to the same burner
-record:
-
-```
-_acme-challenge.fw01.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
-_acme-challenge.fw02.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
-```
-
-```bash
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-for FWN in fw01 fw02 fw03; do
-  acme.sh --issue --dns dns_cf -d "$FWN.fw.example.com" --always-force-new-domain-key --challenge-alias "$BURNER" \
-  && PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt" \
-     acme.sh --deploy -d "$FWN.fw.example.com" --deploy-hook panos --ecc
-done
-unset CF_Token
-```
-
-Bind once per device template (mgmt SSL/TLS Service Profile with that
-firewall's cert), commit and push. To have acme.sh push too, add
-`PANOS_TEMPLATE_STACK="$FWN-stack"` in front of the deploy (needs Operational
-Requests).
-
-**3c. One cert per firewall, deployed directly**
-
-acme.sh now logs into every firewall, so the Panorama advantage is gone for
-these certs. Each firewall needs what step 1 creates: the `acme-deploy` role,
-the `$FWUSER` admin, and the box in Permitted IP Addresses. Push those from a
-Panorama template, so you set them up once.
-
-Then, per firewall, steps 3 to 7 exactly as for a single firewall (scenario 2
-with only the mgmt name), with `CERT` and `FW` both set to that firewall's mgmt
-name. The step 4 fingerprint check is per firewall, because each one still has
-its own self-signed cert on the first run. This is the most work of the three,
-which is why 3a or 3b are the better fit when you have Panorama.
-
-### Enterprise notes
-
-- **Keep GlobalProtect and mgmt in separate certs.** Every user sees the names
-  on the GlobalProtect cert, and a separate cert means a separate key. The
-  combined cert of scenario 2 is fine for a single firewall.
-- **Certificate Transparency.** Every name on a public cert is logged publicly,
-  forever, and searchable (e.g. crt.sh). A wildcard (3a) shows only
-  `*.fw.example.com`.
-- **Internal CA for mgmt.** If policy forbids public certs on mgmt, keep the same
-  pipeline with your own CA: acme.sh works with any ACME server, via
-  `--server https://<your-ca>/acme/directory` on `--issue`. The box must trust
-  that CA, see the [(B) prerequisite](#choose-how-the-box-will-trust-mgmt).
-  How validation works depends on your CA.
-- **Rate limit.** Let's Encrypt issues up to 50 new certs per registered domain
-  per 7 days. Roll out more than 50 firewalls (3b, 3c) over several weeks.
-  Renewals don't count against it.
-- **Change windows.** Leave out `PANOS_TEMPLATE_STACK` and let your regular push
-  deliver the certs.
+Scenarios 3 and 4 (Panorama's own mgmt, GlobalProtect into a template, and the
+mgmt of every firewall) have their own guide: **[PANORAMA.md](PANORAMA.md)**.
 
 ---
 
@@ -793,8 +569,8 @@ IPs limited to that box. If you set an API key lifetime (Device > Setup >
 Management > Authentication Settings), renewals fail when the key expires.
 Before then, set `BOXUSER` and repeat 0b, 0c, 4 (it should say `TRUSTED` by
 now), 5a and 5b. acme.sh saves the key separately for each cert, so with
-several certs (Panorama), run each cert's deploy line once with the new key
-exported, not just the one for `$CERT`.
+several certs, run each cert's deploy line once with the new key exported,
+not just the one for `$CERT`.
 
 ## Troubleshooting
 
@@ -811,13 +587,9 @@ exported, not just the one for `$CERT`.
 | Commit fails | Role missing **Commit**, or another admin holds a config lock |
 | Step 7 deploy fails with a TLS error | (A) Mgmt isn't presenting the new cert yet, or `$FW` isn't a name on it: redo step 6. (B) The box no longer trusts the mgmt cert: see the (B) prerequisite |
 | Users still see the old cert | The SSL/TLS Service Profile points at a different cert object |
-| Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` from an earlier `export` was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
-| Deploy to Panorama fails on the object name | Name longer than 31 characters (wildcards become `WILDCARD_.<domain>`). Set a shorter `PANOS_CERTNAME` |
-| Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or set `PANOS_TEMPLATE_STACK` (role needs Operational Requests) |
 | Issue fails with a CAA error | CAA `accounturi` doesn't match: staging account, or a different acme.sh install |
 | `Domains not changed` … `Skipping` after the staging test | The real run needs `--force` (step 3). `acme.sh --list` shows `LetsEncrypt.org_test` in the CA column while it's still the staging cert |
 | Browser says the cert isn't trusted, issuer mentions "STAGING" | A staging cert was deployed. Issue the real one with `--force` (step 3), then deploy again |
-| Issue fails: too many certificates | Let's Encrypt limit of 50 new certs per registered domain per 7 days. Spread the rollout |
 
 ## License
 
