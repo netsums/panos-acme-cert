@@ -155,15 +155,25 @@ Panorama API key, so `$PANOS_KEY` must stay set until the last one is done.
   with the template push.
 
 ```bash
-PANOS_TEMPLATE="my-template"         # template to import into
-PANOS_TEMPLATE_STACK="my-stack"      # optional: also push the stack (role needs Operational Requests)
-PANOS_CERTNAME="gp-le"               # optional: object name, Panorama limits names to 31 chars
+export PANOS_TEMPLATE="my-template"         # template to import into
+export PANOS_TEMPLATE_STACK="my-stack"      # optional: also push the stack (role needs Operational Requests)
+export PANOS_CERTNAME="gp-le"               # optional: object name, Panorama limits names to 31 chars
 ```
 
-Put them **in front of the deploy command**, not `export`. acme.sh saves every
-`PANOS_*` variable it finds in the environment into the config of the cert
-it's deploying. An exported `PANOS_TEMPLATE` is still set when you deploy the
-next cert, so that one lands in the template too.
+They need `export`, or acme.sh doesn't see them. Each certificate below sets
+its own at the top of its block and **unsets them right after its deploy**.
+
+Why the unset matters: the `panos` hook saves every `PANOS_*` variable it finds
+set (host, user, key, template, template stack, vsys, cert name) into the
+config of the cert it's deploying, and uses those saved values for every
+renewal. An exported `PANOS_TEMPLATE` you forgot to unset is still set when
+you deploy the next cert, so that cert lands in the template too, and stays
+configured that way for its renewals. After each unset, check that only host,
+user and key are left (names only, so the key isn't shown):
+
+```bash
+env | grep '^PANOS_' | cut -d= -f1
+```
 
 ---
 
@@ -223,12 +233,17 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```
 
 ```bash
+export PANOS_TEMPLATE="GP-Template"
+export PANOS_TEMPLATE_STACK="GP-Stack"      # optional, see below
+
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
 unset CF_Token
-PANOS_TEMPLATE="GP-Template" PANOS_TEMPLATE_STACK="GP-Stack" \
-  acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
+acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
+
+unset PANOS_TEMPLATE PANOS_TEMPLATE_STACK
+env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 `PANOS_TEMPLATE_STACK` is optional. With it, acme.sh also pushes the stack to
@@ -271,12 +286,17 @@ _acme-challenge.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```
 
 ```bash
+export PANOS_TEMPLATE="FW-Mgmt-Template"
+export PANOS_CERTNAME="fw-mgmt-wildcard"
+
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --dns dns_cf -d '*.fw.example.com' --always-force-new-domain-key --challenge-alias "$BURNER"
 unset CF_Token
-PANOS_TEMPLATE="FW-Mgmt-Template" PANOS_CERTNAME="fw-mgmt-wildcard" \
-  acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
+acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
+
+unset PANOS_TEMPLATE PANOS_CERTNAME
+env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 `PANOS_CERTNAME` gives the object a readable name. Without it, the hook
@@ -336,21 +356,23 @@ read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Toke
 while read -r FQDN <&3; do
   [ -n "$FQDN" ] || continue
   FWN="${FQDN%%.*}"
+  export PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt"
   acme.sh --issue --dns dns_cf -d "$FQDN" --always-force-new-domain-key --challenge-alias "$BURNER" \
-  && PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt" \
-     acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
+  && acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
 done 3< ~/firewalls.txt
-unset CF_Token
+unset CF_Token PANOS_TEMPLATE PANOS_CERTNAME
+env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 `FWN` is the short name (`fw01`), which gives the device template
-(`fw01-device`) and the object name (`fw01-mgmt`). The loop reads the file on
+(`fw01-device`) and the object name (`fw01-mgmt`). Each pass of the loop sets
+both again, so every firewall's cert goes into its own template. The loop reads the file on
 its own file descriptor (`3<`, `<&3`), so no command inside it can swallow the
 rest of the list.
 
 Templates named differently? Put the template as a second column, e.g.
 `fw01.fw.example.com FW01-Berlin`, read it with `while read -r FQDN TPL <&3`
-and use `PANOS_TEMPLATE="$TPL"`.
+and use `export PANOS_TEMPLATE="$TPL"`.
 
 **New firewall?** Add its line and CNAME, and run the same loop again.
 Firewalls that already have a cert are skipped (`Skipping`, not due yet); only
@@ -359,8 +381,8 @@ remembers every cert with its template.
 
 Bind once per device template (mgmt SSL/TLS Service Profile with that
 firewall's cert), commit and push. To have acme.sh push too, add
-`PANOS_TEMPLATE_STACK="$FWN-stack"` in front of the deploy (needs Operational
-Requests).
+`PANOS_TEMPLATE_STACK="$FWN-stack"` to the `export` line in the loop and to the
+`unset` after it (needs Operational Requests).
 
 ### 3c. One cert per firewall, deployed directly
 
@@ -452,7 +474,7 @@ commit, staging) is in the [README troubleshooting table](README.md#troubleshoot
 
 | Symptom | Cause / fix |
 |---|---|
-| Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` from an earlier `export` was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
+| Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` you didn't `unset` after the previous cert was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
 | Deploy to Panorama fails on the object name | Name longer than 31 characters (wildcards become `WILDCARD_.<domain>`). Set a shorter `PANOS_CERTNAME` |
 | Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or set `PANOS_TEMPLATE_STACK` (role needs Operational Requests) |
 | 3b: only the first firewall gets a cert | A command in the loop read from stdin. Use the loop as shown, with `3<` and `<&3` |
