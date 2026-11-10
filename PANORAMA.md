@@ -49,7 +49,7 @@ then this block.
 ```bash
 PANO=panorama.example.com     # Panorama's mgmt FQDN: the only thing the box talks to
 CERT=vpn.example.com          # name your users connect to (GlobalProtect)
-FWUSER=acme                   # restricted admin you create on Panorama in step 1
+PANOUSER=acme                 # restricted admin you create on Panorama in step 1
 BURNER=burner-domain.net      # throwaway domain for DNS validation
 ```
 
@@ -66,7 +66,7 @@ BURNER=burner-domain.net      # throwaway domain for DNS validation
 
 New roles start with most permissions *enabled*. Check every tab.
 
-**Panorama > Administrators > Add** → the name you set as `$FWUSER` (e.g.
+**Panorama > Administrators > Add** → the name you set as `$PANOUSER` (e.g.
 `acme`), Role Based → `acme-deploy`, long random password (you'll type it
 once, in step 4).
 
@@ -131,9 +131,9 @@ TLS=(-k --pinnedpubkey "$PIN"); INSECURE=(--insecure)
 ## Step 4: API key
 
 ```bash
-read -rsp "Password for $FWUSER: " P; echo
+read -rsp "Password for $PANOUSER: " P; echo
 RESP="$(printf '%s' "$P" | curl -sS "${TLS[@]}" -X POST "https://$PANO/api/?type=keygen" \
-    --data-urlencode "user=$FWUSER" --data-urlencode 'password@-')"
+    --data-urlencode "user=$PANOUSER" --data-urlencode 'password@-')"
 unset P
 PANOS_KEY="$(sed -n 's:.*<key>\(.*\)</key>.*:\1:p' <<<"$RESP")"
 if [ -n "$PANOS_KEY" ]; then echo "API key OK"; else echo "Keygen FAILED: $RESP"; fi
@@ -196,7 +196,7 @@ same shell:
 ```bash
 acme.sh --issue --dns dns_cf -d "$PANO" --always-force-new-domain-key --challenge-alias "$BURNER" --force
 unset CF_Token
-export PANOS_HOST="$PANO" PANOS_USER="$FWUSER" PANOS_KEY
+export PANOS_HOST="$PANO" PANOS_USER="$PANOUSER" PANOS_KEY
 acme.sh --deploy -d "$PANO" --deploy-hook panos --ecc "${INSECURE[@]}"
 ```
 
@@ -367,7 +367,7 @@ Requests).
 acme.sh now logs into every firewall, so the Panorama advantage is gone for
 these certs. Each firewall needs what
 [README step 1](README.md#step-1-firewall-admin-user-configuration) creates:
-the `acme-deploy` role, the `$FWUSER` admin, and the box in Permitted IP
+the `acme-deploy` role, the admin (`$FWUSER` in the README), and the box in Permitted IP
 Addresses. Push those from a Panorama template, so you set them up once.
 
 Then, per firewall, follow the [README](README.md) steps 3 to 7 exactly as for
