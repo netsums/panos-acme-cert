@@ -246,10 +246,20 @@ unset PANOS_TEMPLATE PANOS_TEMPLATE_STACK
 env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
-`PANOS_TEMPLATE_STACK` is optional. With it, acme.sh also pushes the stack to
-the firewalls (the role needs **Operational Requests**). Without it, acme.sh
-only commits to Panorama and your next regular push delivers the cert, which
-fits change windows. acme.sh renews roughly the last third of a cert's
+**Commit and push.** The hook always commits to Panorama after the import,
+and there's no option to skip it: renewals run unattended, and a cert left in
+the candidate config would never go live. It's a partial commit of the
+`$PANOUSER` admin's changes only, so other admins' pending changes stay
+uncommitted. A commit on Panorama alone changes nothing on the firewalls.
+
+The push is what you control, with `PANOS_TEMPLATE_STACK`. It doesn't change
+the stack; it only names the stack acme.sh pushes after the commit (a
+template push is always of a stack, so name the one that contains your
+template). With it, acme.sh pushes that stack to its firewalls (the role
+needs **Operational Requests**, used to wait for the commit job). Without it,
+acme.sh stops after the commit and your next regular push delivers the cert,
+which fits change windows and keeps the push, your review point, in your
+hands. acme.sh renews roughly the last third of a cert's
 lifetime early: about a month with 90-day certs, about two weeks with 45-day
 certs. Your push schedule must fit inside that.
 
