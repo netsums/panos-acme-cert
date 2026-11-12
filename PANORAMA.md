@@ -259,7 +259,12 @@ template). With it, acme.sh pushes that stack to its firewalls (the role
 needs **Operational Requests**, used to wait for the commit job). Without it,
 acme.sh stops after the commit and your next regular push delivers the cert,
 which fits change windows and keeps the push, your review point, in your
-hands. acme.sh renews roughly the last third of a cert's
+hands.
+
+`PANOS_TEMPLATE_STACK` pushes one stack only, and a push scoped to the acme
+admin can still carry a colleague's committed changes. For pushing every
+stack that uses the template, safely, see the experimental
+[full-auto push](FULL-AUTO-PUSH.md) (not tested on a real Panorama yet). acme.sh renews roughly the last third of a cert's
 lifetime early: about a month with 90-day certs, about two weeks with 45-day
 certs. Your push schedule must fit inside that.
 
