@@ -60,7 +60,7 @@ BURNER=burner-domain.net      # throwaway domain for DNS validation
 | Tab | Setting |
 |---|---|
 | Web UI | disable **everything** |
-| XML API | disable everything, then enable **Import** and **Commit** only. Add **Operational Requests** only if acme.sh should push to the firewalls itself (`PANOS_TEMPLATE_STACK`) |
+| XML API | disable everything, then enable **Import** and **Commit** only. Add **Operational Requests** only for the [full-auto push](FULL-AUTO-PUSH.md) |
 | Command Line | None |
 | REST API | disable everything |
 
@@ -156,7 +156,6 @@ Panorama API key, so `$PANOS_KEY` must stay set until the last one is done.
 
 ```bash
 export PANOS_TEMPLATE="my-template"         # template to import into
-export PANOS_TEMPLATE_STACK="my-stack"      # optional: also push the stack (role needs Operational Requests)
 export PANOS_CERTNAME="gp-le"               # optional: object name, Panorama limits names to 31 chars
 ```
 
@@ -234,7 +233,6 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 export PANOS_TEMPLATE="GP-Template"
-export PANOS_TEMPLATE_STACK="GP-Stack"      # optional, see below
 
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
@@ -242,7 +240,7 @@ acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challeng
 unset CF_Token
 acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
 
-unset PANOS_TEMPLATE PANOS_TEMPLATE_STACK
+unset PANOS_TEMPLATE
 env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
@@ -252,21 +250,20 @@ the candidate config would never go live. It's a partial commit of the
 `$PANOUSER` admin's changes only, so other admins' pending changes stay
 uncommitted. A commit on Panorama alone changes nothing on the firewalls.
 
-The push is what you control, with `PANOS_TEMPLATE_STACK`. It doesn't change
-the stack; it only names the stack acme.sh pushes after the commit (a
-template push is always of a stack, so name the one that contains your
-template). With it, acme.sh pushes that stack to its firewalls (the role
-needs **Operational Requests**, used to wait for the commit job). Without it,
-acme.sh stops after the commit and your next regular push delivers the cert,
-which fits change windows and keeps the push, your review point, in your
-hands.
+**The push.** acme.sh has `PANOS_TEMPLATE_STACK` for it, but it names **one**
+stack, and a template like this one usually sits in many stacks. So leave it
+out and pick one of two ways:
 
-`PANOS_TEMPLATE_STACK` pushes one stack only, and a push scoped to the acme
-admin can still carry a colleague's committed changes. For pushing every
-stack that uses the template, safely, see the experimental
-[full-auto push](FULL-AUTO-PUSH.md) (not tested on a real Panorama yet). acme.sh renews roughly the last third of a cert's
-lifetime early: about a month with 90-day certs, about two weeks with 45-day
-certs. Your push schedule must fit inside that.
+- **acme.sh commits, you push (default).** The cert waits on Panorama until
+  your next regular push, in your change window. acme.sh renews roughly the
+  last third of a cert's lifetime early: about a month with 90-day certs,
+  about two weeks with 45-day certs. Your push schedule must fit inside that.
+- **Full-auto push (experimental).** Two small extra hooks push every stack
+  that contains the template, but only if those stacks had nothing else
+  waiting before the import. Tested on Panorama: a push scoped to the acme
+  admin still carries a colleague's change if that colleague committed the
+  normal way, so scoping alone isn't safe. See
+  [FULL-AUTO-PUSH.md](FULL-AUTO-PUSH.md); not tested end to end yet.
 
 Bind once, **in the template**: SSL/TLS Service Profile with this cert, used by
 the portal and gateway. Commit and push.
@@ -395,9 +392,10 @@ the new one is issued and deployed. Renewals don't need the file: acme.sh
 remembers every cert with its template.
 
 Bind once per device template (mgmt SSL/TLS Service Profile with that
-firewall's cert), commit and push. To have acme.sh push too, add
-`PANOS_TEMPLATE_STACK="$FWN-stack"` to the `export` line in the loop and to the
-`unset` after it (needs Operational Requests).
+firewall's cert), commit and push. To have renewals push too, use the
+[full-auto push](FULL-AUTO-PUSH.md) hooks rather than `PANOS_TEMPLATE_STACK`:
+they also cover a template that sits in several stacks, and they don't push
+when a colleague's change is waiting.
 
 ### 3c. One cert per firewall, deployed directly
 
@@ -491,7 +489,7 @@ commit, staging) is in the [README troubleshooting table](README.md#troubleshoot
 |---|---|
 | Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` you didn't `unset` after the previous cert was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
 | Deploy to Panorama fails on the object name | Name longer than 31 characters (wildcards become `WILDCARD_.<domain>`). Set a shorter `PANOS_CERTNAME` |
-| Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or set `PANOS_TEMPLATE_STACK` (role needs Operational Requests) |
+| Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or use the [full-auto push](FULL-AUTO-PUSH.md) |
 | 3b: only the first firewall gets a cert | A command in the loop read from stdin. Use the loop as shown, with `3<` and `<&3` |
 | 3b: issue fails for a name that looks right | Windows line endings in `~/firewalls.txt`. Fix with `sed -i 's/\r$//' ~/firewalls.txt` |
 | Issue fails: too many certificates | Let's Encrypt limit of 50 new certs per registered domain per 7 days. Spread the rollout |
