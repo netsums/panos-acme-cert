@@ -351,13 +351,12 @@ fw01.fw.example.com
 fw02.fw.example.com
 ```
 
-Write it on the box itself. A file written on Windows and copied over has an
-invisible `\r` at the end of every line, and acme.sh gets the wrong name.
-
 Check every CNAME. An empty result means: fix the DNS before you go on.
 
 ```bash
-while read -r FQDN; do echo "$FQDN -> $(dig +short CNAME "_acme-challenge.$FQDN")"; done < ~/firewalls.txt
+while IFS=$' \t\r' read -r FQDN <&3 || [ -n "$FQDN" ]; do
+  [ -n "$FQDN" ] && echo "$FQDN -> $(dig +short CNAME "_acme-challenge.$FQDN")"
+done 3< ~/firewalls.txt
 ```
 
 Issue and deploy every firewall in the file:
@@ -365,7 +364,7 @@ Issue and deploy every firewall in the file:
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-while read -r FQDN <&3; do
+while IFS=$' \t\r' read -r FQDN <&3 || [ -n "$FQDN" ]; do
   [ -n "$FQDN" ] || continue
   FWN="${FQDN%%.*}"
   export PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt"
@@ -380,10 +379,12 @@ env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS
 (`fw01-device`) and the object name (`fw01-mgmt`). Each pass of the loop sets
 both again, so every firewall's cert goes into its own template. The loop reads the file on
 its own file descriptor (`3<`, `<&3`), so no command inside it can swallow the
-rest of the list.
+rest of the list. `IFS=$' \t\r'` drops the invisible `\r` that a file
+written on Windows has at the end of every line, and `|| [ -n "$FQDN" ]` still
+reads a last line without a line break. So the file can come from anywhere.
 
 Templates named differently? Put the template as a second column, e.g.
-`fw01.fw.example.com FW01-Berlin`, read it with `while read -r FQDN TPL <&3`
+`fw01.fw.example.com FW01-Berlin`, read it with `while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]`
 and use `export PANOS_TEMPLATE="$TPL"`.
 
 **New firewall?** Add its line and CNAME, and run the same loop again.
@@ -491,5 +492,5 @@ commit, staging) is in the [README troubleshooting table](README.md#troubleshoot
 | Deploy to Panorama fails on the object name | Name longer than 31 characters (wildcards become `WILDCARD_.<domain>`). Set a shorter `PANOS_CERTNAME` |
 | Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or use the [full-auto push](FULL-AUTO-PUSH.md) |
 | 3b: only the first firewall gets a cert | A command in the loop read from stdin. Use the loop as shown, with `3<` and `<&3` |
-| 3b: issue fails for a name that looks right | Windows line endings in `~/firewalls.txt`. Fix with `sed -i 's/\r$//' ~/firewalls.txt` |
+| 3b: issue fails for a name that looks right | Check `~/firewalls.txt` with `cat -A ~/firewalls.txt`: each line must end in `$` with nothing hidden before it. The loop strips `\r`, but not other stray characters |
 | Issue fails: too many certificates | Let's Encrypt limit of 50 new certs per registered domain per 7 days. Spread the rollout |
