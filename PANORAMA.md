@@ -279,11 +279,15 @@ Pick one:
 | | How | Private keys | Box talks to | Good for |
 |---|---|---|---|---|
 | **3a** | One wildcard cert, in a shared template | One key on every firewall | Panorama | Simplest. Hides firewall names from CT logs |
-| **3b** | One cert per firewall, each into its own device template | One key per firewall | Panorama | Per-device keys, when every firewall has its own template in its stack |
+| **3b** | One cert per firewall, each into its own device template | One key per firewall | Panorama | Per-device keys, when every firewall has its own template in its stack. **Recommended for production** |
 | **3c** | One cert per firewall, deployed to each firewall directly | One key per firewall | Every firewall | No per-device templates |
 
 Not recommended: one cert listing every firewall name. It has the shared key of
-3a, and publishes every firewall name in the Certificate Transparency logs.
+3a and publishes every firewall name in the Certificate Transparency logs. Every
+change also touches every firewall: a new firewall means a new cert deployed to
+all of them, a removed one stays on the others until you issue again, and Let's
+Encrypt allows at most 100 names per cert. The downsides of the wildcard,
+without its simplicity.
 
 All three need firewall mgmt names in a public domain you own, e.g.
 `fw01.fw.example.com`. They only have to resolve internally; only the
@@ -457,6 +461,15 @@ crontab -l | grep acme.sh
   matters most. See [Shorter certificate lifetimes](README.md#shorter-certificate-lifetimes-47-days-by-2029).
 - **Notifications to a team, not a person.** A shared mailbox or a Teams
   channel, set up as in [README step 7](README.md#step-7-make-renewals-hands-off).
+- **Monitor expiry from outside.** Don't rely on the box to report its own
+  failures. Point the monitoring you already have at every mgmt interface and
+  the GlobalProtect portal, and alert well before expiry. Any TLS expiry check
+  works; the bare version, which fails when less than 14 days remain:
+
+  ```bash
+  echo | openssl s_client -connect fw01.fw.example.com:443 -servername fw01.fw.example.com 2>/dev/null \
+    | openssl x509 -noout -checkend 1209600
+  ```
 - **Treat the box as important.** It holds the Panorama API key, the burner
   token and your ACME account key, and so does its backup. See
   [Where the credentials live](README.md#where-the-credentials-live).
