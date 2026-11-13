@@ -327,8 +327,8 @@ it into the template.
 
 ### 3b. One cert per firewall, in device templates
 
-Prerequisite: each firewall's template stack contains its own template, named
-`<fw>-device` below (e.g. `fw01-device`).
+Prerequisite: each firewall's template stack contains a template of its own
+(a device template), which no other firewall uses.
 
 One CNAME per firewall in your **real** zone, all pointing to the same burner
 record. Create them by hand: scripting them would put a key for your real zone
@@ -340,22 +340,29 @@ _acme-challenge.fw01.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 _acme-challenge.fw02.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```
 
-List the firewalls in a text file on the box, one full mgmt name per line:
+List the firewalls in a text file on the box, one per line: the full mgmt name,
+a space, and that firewall's device template, exactly as it's named on
+Panorama:
 
 ```bash
 nano ~/firewalls.txt
 ```
 
 ```
-fw01.fw.example.com
-fw02.fw.example.com
+fw01.fw.example.com FW01-Berlin
+fw02.fw.example.com FW02-Paris
 ```
 
-Check every CNAME. An empty result means: fix the DNS before you go on.
+No template stacks in the file: the deploy only needs the template. The stacks
+only matter for the push, and the [full-auto push](FULL-AUTO-PUSH.md) looks them
+up on Panorama by itself, so they can't go stale in this file.
+
+Check every line. An empty CNAME means: fix the DNS before you go on. A
+missing template means: fix the file.
 
 ```bash
-while IFS=$' \t\r' read -r FQDN <&3 || [ -n "$FQDN" ]; do
-  [ -n "$FQDN" ] && echo "$FQDN -> $(dig +short CNAME "_acme-challenge.$FQDN")"
+while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
+  [ -n "$FQDN" ] && echo "$FQDN [${TPL:-NO TEMPLATE}] -> $(dig +short CNAME "_acme-challenge.$FQDN")"
 done 3< ~/firewalls.txt
 ```
 
@@ -364,10 +371,10 @@ Issue and deploy every firewall in the file:
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-while IFS=$' \t\r' read -r FQDN <&3 || [ -n "$FQDN" ]; do
+while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
   [ -n "$FQDN" ] || continue
-  FWN="${FQDN%%.*}"
-  export PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt"
+  [ -n "$TPL" ] || { echo "SKIPPED $FQDN: no template in firewalls.txt"; continue; }
+  export PANOS_TEMPLATE="$TPL" PANOS_CERTNAME="${FQDN%%.*}-mgmt"
   acme.sh --issue --dns dns_cf -d "$FQDN" --always-force-new-domain-key --challenge-alias "$BURNER" \
   && acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
 done 3< ~/firewalls.txt
@@ -375,17 +382,15 @@ unset CF_Token PANOS_TEMPLATE PANOS_CERTNAME
 env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
-`FWN` is the short name (`fw01`), which gives the device template
-(`fw01-device`) and the object name (`fw01-mgmt`). Each pass of the loop sets
-both again, so every firewall's cert goes into its own template. The loop reads the file on
-its own file descriptor (`3<`, `<&3`), so no command inside it can swallow the
-rest of the list. `IFS=$' \t\r'` drops the invisible `\r` that a file
-written on Windows has at the end of every line, and `|| [ -n "$FQDN" ]` still
-reads a last line without a line break. So the file can come from anywhere.
-
-Templates named differently? Put the template as a second column, e.g.
-`fw01.fw.example.com FW01-Berlin`, read it with `while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]`
-and use `export PANOS_TEMPLATE="$TPL"`.
+Each pass of the loop sets the template from the file and the object name from
+the short name (`fw01-mgmt`), so every firewall's cert goes into its own
+template. A line without a template is skipped, not deployed: without
+`PANOS_TEMPLATE`, acme.sh would import the cert into Panorama itself. The loop
+reads the file on its own file descriptor (`3<`, `<&3`), so no command inside it
+can swallow the rest of the list. `IFS=$' \t\r'` drops the invisible `\r` that a
+file written on Windows has at the end of every line, and `|| [ -n "$FQDN" ]`
+still reads a last line without a line break. So the file can come from
+anywhere.
 
 **New firewall?** Add its line and CNAME, and run the same loop again.
 Firewalls that already have a cert are skipped (`Skipping`, not due yet); only
