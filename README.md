@@ -560,9 +560,10 @@ mgmt of every firewall) have their own guide: **[PANORAMA.md](PANORAMA.md)**.
   valid cert for those names. [CAA](#optional-lock-issuance-to-your-account-caa)
   closes that.
 
-What a stolen key can do: import certificates or files and trigger a commit,
-which also pushes other admins' pending changes. It can't change policy or
-read your config.
+What a stolen key can do: import certificates or files and trigger a commit.
+It can't change policy or read your config. acme.sh's own commit is a partial
+commit of the `$FWUSER` admin's changes only, so other admins' pending changes
+stay uncommitted.
 
 Keep it small: a dedicated box, the `acmesh` user, `chmod 700 ~/.acme.sh`, mgmt Permitted
 IPs limited to that box. If you set an API key lifetime (Device > Setup >

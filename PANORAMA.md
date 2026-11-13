@@ -60,7 +60,7 @@ BURNER=burner-domain.net      # throwaway domain for DNS validation
 | Tab | Setting |
 |---|---|
 | Web UI | disable **everything** |
-| XML API | disable everything, then enable **Import** and **Commit** only. Add **Operational Requests** only if acme.sh should push to the firewalls itself (`PANOS_TEMPLATE_STACK`) |
+| XML API | disable everything, then enable **Import** and **Commit** only. Add **Operational Requests** only for the [full-auto push](FULL-AUTO-PUSH.md) |
 | Command Line | None |
 | REST API | disable everything |
 
@@ -155,15 +155,24 @@ Panorama API key, so `$PANOS_KEY` must stay set until the last one is done.
   with the template push.
 
 ```bash
-PANOS_TEMPLATE="my-template"         # template to import into
-PANOS_TEMPLATE_STACK="my-stack"      # optional: also push the stack (role needs Operational Requests)
-PANOS_CERTNAME="gp-le"               # optional: object name, Panorama limits names to 31 chars
+export PANOS_TEMPLATE="my-template"         # template to import into
+export PANOS_CERTNAME="gp-le"               # optional: object name, Panorama limits names to 31 chars
 ```
 
-Put them **in front of the deploy command**, not `export`. acme.sh saves every
-`PANOS_*` variable it finds in the environment into the config of the cert
-it's deploying. An exported `PANOS_TEMPLATE` is still set when you deploy the
-next cert, so that one lands in the template too.
+They need `export`, or acme.sh doesn't see them. Each certificate below sets
+its own at the top of its block and **unsets them right after its deploy**.
+
+Why the unset matters: the `panos` hook saves every `PANOS_*` variable it finds
+set (host, user, key, template, template stack, vsys, cert name) into the
+config of the cert it's deploying, and uses those saved values for every
+renewal. An exported `PANOS_TEMPLATE` you forgot to unset is still set when
+you deploy the next cert, so that cert lands in the template too, and stays
+configured that way for its renewals. After each unset, check that only host,
+user and key are left (names only, so the key isn't shown):
+
+```bash
+env | grep '^PANOS_' | cut -d= -f1
+```
 
 ---
 
@@ -223,20 +232,38 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```
 
 ```bash
+export PANOS_TEMPLATE="GP-Template"
+
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
 unset CF_Token
-PANOS_TEMPLATE="GP-Template" PANOS_TEMPLATE_STACK="GP-Stack" \
-  acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
+acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
+
+unset PANOS_TEMPLATE
+env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
-`PANOS_TEMPLATE_STACK` is optional. With it, acme.sh also pushes the stack to
-the firewalls (the role needs **Operational Requests**). Without it, acme.sh
-only commits to Panorama and your next regular push delivers the cert, which
-fits change windows. acme.sh renews roughly the last third of a cert's
-lifetime early: about a month with 90-day certs, about two weeks with 45-day
-certs. Your push schedule must fit inside that.
+**Commit and push.** The hook always commits to Panorama after the import,
+and there's no option to skip it: renewals run unattended, and a cert left in
+the candidate config would never go live. It's a partial commit of the
+`$PANOUSER` admin's changes only, so other admins' pending changes stay
+uncommitted. A commit on Panorama alone changes nothing on the firewalls.
+
+**The push.** acme.sh has `PANOS_TEMPLATE_STACK` for it, but it names **one**
+stack, and a template like this one usually sits in many stacks. So leave it
+out and pick one of two ways:
+
+- **acme.sh commits, you push (default).** The cert waits on Panorama until
+  your next regular push, in your change window. acme.sh renews roughly the
+  last third of a cert's lifetime early: about a month with 90-day certs,
+  about two weeks with 45-day certs. Your push schedule must fit inside that.
+- **Full-auto push (experimental).** Two small extra hooks push every stack
+  that contains the template, but only if those stacks had nothing else
+  waiting before the import. Tested on Panorama: a push scoped to the acme
+  admin still carries a colleague's change if that colleague committed the
+  normal way, so scoping alone isn't safe. See
+  [FULL-AUTO-PUSH.md](FULL-AUTO-PUSH.md); not tested end to end yet.
 
 Bind once, **in the template**: SSL/TLS Service Profile with this cert, used by
 the portal and gateway. Commit and push.
@@ -252,11 +279,15 @@ Pick one:
 | | How | Private keys | Box talks to | Good for |
 |---|---|---|---|---|
 | **3a** | One wildcard cert, in a shared template | One key on every firewall | Panorama | Simplest. Hides firewall names from CT logs |
-| **3b** | One cert per firewall, each into its own device template | One key per firewall | Panorama | Per-device keys, when every firewall has its own template in its stack |
+| **3b** | One cert per firewall, each into its own device template | One key per firewall | Panorama | Per-device keys, when every firewall has its own template in its stack. **Recommended for production** |
 | **3c** | One cert per firewall, deployed to each firewall directly | One key per firewall | Every firewall | No per-device templates |
 
 Not recommended: one cert listing every firewall name. It has the shared key of
-3a, and publishes every firewall name in the Certificate Transparency logs.
+3a and publishes every firewall name in the Certificate Transparency logs. Every
+change also touches every firewall: a new firewall means a new cert deployed to
+all of them, a removed one stays on the others until you issue again, and Let's
+Encrypt allows at most 100 names per cert. The downsides of the wildcard,
+without its simplicity.
 
 All three need firewall mgmt names in a public domain you own, e.g.
 `fw01.fw.example.com`. They only have to resolve internally; only the
@@ -271,12 +302,17 @@ _acme-challenge.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```
 
 ```bash
+export PANOS_TEMPLATE="FW-Mgmt-Template"
+export PANOS_CERTNAME="fw-mgmt-wildcard"
+
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --dns dns_cf -d '*.fw.example.com' --always-force-new-domain-key --challenge-alias "$BURNER"
 unset CF_Token
-PANOS_TEMPLATE="FW-Mgmt-Template" PANOS_CERTNAME="fw-mgmt-wildcard" \
-  acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
+acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
+
+unset PANOS_TEMPLATE PANOS_CERTNAME
+env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 `PANOS_CERTNAME` gives the object a readable name. Without it, the hook
@@ -295,8 +331,8 @@ it into the template.
 
 ### 3b. One cert per firewall, in device templates
 
-Prerequisite: each firewall's template stack contains its own template, named
-`<fw>-device` below (e.g. `fw01-device`).
+Prerequisite: each firewall's template stack contains a template of its own
+(a device template), which no other firewall uses.
 
 One CNAME per firewall in your **real** zone, all pointing to the same burner
 record. Create them by hand: scripting them would put a key for your real zone
@@ -308,24 +344,30 @@ _acme-challenge.fw01.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 _acme-challenge.fw02.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```
 
-List the firewalls in a text file on the box, one full mgmt name per line:
+List the firewalls in a text file on the box, one per line: the full mgmt name,
+a space, and that firewall's device template, exactly as it's named on
+Panorama:
 
 ```bash
 nano ~/firewalls.txt
 ```
 
 ```
-fw01.fw.example.com
-fw02.fw.example.com
+fw01.fw.example.com FW01-Berlin
+fw02.fw.example.com FW02-Paris
 ```
 
-Write it on the box itself. A file written on Windows and copied over has an
-invisible `\r` at the end of every line, and acme.sh gets the wrong name.
+No template stacks in the file: the deploy only needs the template. The stacks
+only matter for the push, and the [full-auto push](FULL-AUTO-PUSH.md) looks them
+up on Panorama by itself, so they can't go stale in this file.
 
-Check every CNAME. An empty result means: fix the DNS before you go on.
+Check every line. An empty CNAME means: fix the DNS before you go on. A
+missing template means: fix the file.
 
 ```bash
-while read -r FQDN; do echo "$FQDN -> $(dig +short CNAME "_acme-challenge.$FQDN")"; done < ~/firewalls.txt
+while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
+  [ -n "$FQDN" ] && echo "$FQDN [${TPL:-NO TEMPLATE}] -> $(dig +short CNAME "_acme-challenge.$FQDN")"
+done 3< ~/firewalls.txt
 ```
 
 Issue and deploy every firewall in the file:
@@ -333,24 +375,26 @@ Issue and deploy every firewall in the file:
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
-while read -r FQDN <&3; do
+while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
   [ -n "$FQDN" ] || continue
-  FWN="${FQDN%%.*}"
+  [ -n "$TPL" ] || { echo "SKIPPED $FQDN: no template in firewalls.txt"; continue; }
+  export PANOS_TEMPLATE="$TPL" PANOS_CERTNAME="${FQDN%%.*}-mgmt"
   acme.sh --issue --dns dns_cf -d "$FQDN" --always-force-new-domain-key --challenge-alias "$BURNER" \
-  && PANOS_TEMPLATE="$FWN-device" PANOS_CERTNAME="$FWN-mgmt" \
-     acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
+  && acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
 done 3< ~/firewalls.txt
-unset CF_Token
+unset CF_Token PANOS_TEMPLATE PANOS_CERTNAME
+env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
-`FWN` is the short name (`fw01`), which gives the device template
-(`fw01-device`) and the object name (`fw01-mgmt`). The loop reads the file on
-its own file descriptor (`3<`, `<&3`), so no command inside it can swallow the
-rest of the list.
-
-Templates named differently? Put the template as a second column, e.g.
-`fw01.fw.example.com FW01-Berlin`, read it with `while read -r FQDN TPL <&3`
-and use `PANOS_TEMPLATE="$TPL"`.
+Each pass of the loop sets the template from the file and the object name from
+the short name (`fw01-mgmt`), so every firewall's cert goes into its own
+template. A line without a template is skipped, not deployed: without
+`PANOS_TEMPLATE`, acme.sh would import the cert into Panorama itself. The loop
+reads the file on its own file descriptor (`3<`, `<&3`), so no command inside it
+can swallow the rest of the list. `IFS=$' \t\r'` drops the invisible `\r` that a
+file written on Windows has at the end of every line, and `|| [ -n "$FQDN" ]`
+still reads a last line without a line break. So the file can come from
+anywhere.
 
 **New firewall?** Add its line and CNAME, and run the same loop again.
 Firewalls that already have a cert are skipped (`Skipping`, not due yet); only
@@ -358,9 +402,10 @@ the new one is issued and deployed. Renewals don't need the file: acme.sh
 remembers every cert with its template.
 
 Bind once per device template (mgmt SSL/TLS Service Profile with that
-firewall's cert), commit and push. To have acme.sh push too, add
-`PANOS_TEMPLATE_STACK="$FWN-stack"` in front of the deploy (needs Operational
-Requests).
+firewall's cert), commit and push. To have renewals push too, use the
+[full-auto push](FULL-AUTO-PUSH.md) hooks rather than `PANOS_TEMPLATE_STACK`:
+they also cover a template that sits in several stacks, and they don't push
+when a colleague's change is waiting.
 
 ### 3c. One cert per firewall, deployed directly
 
@@ -416,6 +461,15 @@ crontab -l | grep acme.sh
   matters most. See [Shorter certificate lifetimes](README.md#shorter-certificate-lifetimes-47-days-by-2029).
 - **Notifications to a team, not a person.** A shared mailbox or a Teams
   channel, set up as in [README step 7](README.md#step-7-make-renewals-hands-off).
+- **Monitor expiry from outside.** Don't rely on the box to report its own
+  failures. Point the monitoring you already have at every mgmt interface and
+  the GlobalProtect portal, and alert well before expiry. Any TLS expiry check
+  works; the bare version, which fails when less than 14 days remain:
+
+  ```bash
+  echo | openssl s_client -connect fw01.fw.example.com:443 -servername fw01.fw.example.com 2>/dev/null \
+    | openssl x509 -noout -checkend 1209600
+  ```
 - **Treat the box as important.** It holds the Panorama API key, the burner
   token and your ACME account key, and so does its backup. See
   [Where the credentials live](README.md#where-the-credentials-live).
@@ -452,9 +506,9 @@ commit, staging) is in the [README troubleshooting table](README.md#troubleshoot
 
 | Symptom | Cause / fix |
 |---|---|
-| Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` from an earlier `export` was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
+| Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` you didn't `unset` after the previous cert was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
 | Deploy to Panorama fails on the object name | Name longer than 31 characters (wildcards become `WILDCARD_.<domain>`). Set a shorter `PANOS_CERTNAME` |
-| Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or set `PANOS_TEMPLATE_STACK` (role needs Operational Requests) |
+| Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or use the [full-auto push](FULL-AUTO-PUSH.md) |
 | 3b: only the first firewall gets a cert | A command in the loop read from stdin. Use the loop as shown, with `3<` and `<&3` |
-| 3b: issue fails for a name that looks right | Windows line endings in `~/firewalls.txt`. Fix with `sed -i 's/\r$//' ~/firewalls.txt` |
+| 3b: issue fails for a name that looks right | Check `~/firewalls.txt` with `cat -A ~/firewalls.txt`: each line must end in `$` with nothing hidden before it. The loop strips `\r`, but not other stray characters |
 | Issue fails: too many certificates | Let's Encrypt limit of 50 new certs per registered domain per 7 days. Spread the rollout |
