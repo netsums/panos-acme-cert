@@ -178,7 +178,7 @@ read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Toke
 screen or saving it in shell history. `export` hands it to acme.sh, whose
 Cloudflare module reads exactly that variable name. Every `--issue` below uses
 it from there, so you don't enter it again. It stays set until the
-[end of step 7](#done-clear-the-shell), like the API key from step 4. acme.sh
+[cleanup in step 8](#step-8-cleanup), like the API key from step 4. acme.sh
 saves the token and zone ID into each cert's config for its renewals (see
 [Where the credentials live](#where-the-credentials-live)), which is why the
 token must only be able to edit the burner zone.
@@ -323,6 +323,8 @@ curl -sS -o /dev/null --connect-timeout 5 "https://$PANO/" \
   && INSECURE=()
 ```
 
+**Last certificate you need?** Go to [Step 8: Cleanup](#step-8-cleanup).
+
 ## Step 6: GlobalProtect cert, into its template
 
 This cert doesn't stay on Panorama: it goes into the template your
@@ -390,6 +392,8 @@ Bind once, **in the template**: **Device > Certificate Management > SSL/TLS
 Service Profile** → the profile used by the portal and gateway → Certificate =
 `vpn.example.com` (or create a profile and select it in the portal and
 gateway). Commit and push.
+
+**Last certificate you need?** Go to [Step 8: Cleanup](#step-8-cleanup).
 
 ### Other uses of the cert
 
@@ -487,6 +491,8 @@ Renew now: `acme.sh --renew -d '*.fw.example.com' --force`. The saved
 `--always-force-new-domain-key` makes a new key, and the saved deploy imports
 it into the template.
 
+**Last certificate you need?** Go to [Step 8: Cleanup](#step-8-cleanup).
+
 ### 7b. One cert per firewall, in device templates
 
 Prerequisite: each firewall's template stack contains a template of its own
@@ -562,6 +568,8 @@ firewall's cert), commit and push. To have renewals push too, use the
 [full-auto push](FULL-AUTO-PUSH.md) hooks rather than `PANOS_TEMPLATE_STACK`:
 they also cover a template that sits in several stacks, and they don't push
 when a colleague's change is waiting.
+
+**Last certificate you need?** Go to [Step 8: Cleanup](#step-8-cleanup).
 
 ### 7c. One cert per firewall, deployed directly
 
@@ -660,15 +668,21 @@ unset FW_KEY
 
 Repeat this section with the next firewall's name in `FW`.
 
-## Done: clear the shell
+## Step 8: Cleanup
 
-After your last certificate (step 6 if you stop there, step 7 otherwise),
-remove the token and the API key from the shell. acme.sh already has its own
-copies for the renewals:
+Do this after your last certificate, whichever step that was. It removes the
+Cloudflare token and the Panorama API key from the shell. acme.sh already has
+its own copies for the renewals, so nothing stops working:
 
 ```bash
 unset CF_Token CF_Zone_ID PANOS_KEY
+env | grep -E '^(CF_|PANOS_)' | cut -d= -f1   # should only show PANOS_HOST and PANOS_USER
 ```
+
+Closing the shell (`exit`, or closing the SSH session) clears every variable
+too. So if you skipped this step and the shell is already closed, there's
+nothing left to clean. The `unset` is for when you keep working in the same
+shell, e.g. for the checks below.
 
 ---
 
