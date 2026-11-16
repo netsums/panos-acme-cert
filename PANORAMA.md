@@ -359,10 +359,14 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 
 ```bash
 export PANOS_TEMPLATE="GP-Template"         # template your GlobalProtect firewalls use
+```
 
+```bash
 acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
 acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
+```
 
+```bash
 unset PANOS_TEMPLATE PANOS_CERTNAME
 env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
