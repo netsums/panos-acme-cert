@@ -24,7 +24,6 @@ through its API.
 
 - **Video 1: one firewall** (scenarios 1 and 2): https://youtu.be/UmRaHxGueyY
 - **Video 2: Panorama and many firewalls** (scenarios 3 and 4): Video will be available soon!
-  The guide for it is [PANORAMA.md](PANORAMA.md).
 
 ---
 
@@ -50,7 +49,7 @@ Two rules cover all four:
   firewall keeps serving the old one until it expires.
 
 **Scenarios 1 and 2:** follow steps 0 to 7 below. **Scenarios 3 and 4:**
-follow [PANORAMA.md](PANORAMA.md), the guide for Panorama and many firewalls.
+the guide for Panorama and many firewalls comes with video 2.
 
 ---
 
@@ -543,7 +542,7 @@ for all future renewals.
 ## Panorama and many firewalls
 
 Scenarios 3 and 4 (Panorama's own mgmt, GlobalProtect into a template, and the
-mgmt of every firewall) have their own guide: **[PANORAMA.md](PANORAMA.md)**.
+mgmt of every firewall) get their own guide with video 2.
 
 ---
 
