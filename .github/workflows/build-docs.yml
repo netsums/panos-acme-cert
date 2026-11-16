@@ -1,0 +1,43 @@
+# Keeps the shared text in README.md and PANORAMA.md in sync with docs/_shared/.
+# On a push to main: rebuilds both guides and commits the result.
+# On a pull request: only checks, and fails if a guide doesn't match the snippets.
+name: Build docs
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/_shared/**"
+      - "README.md"
+      - "PANORAMA.md"
+      - "scripts/build_docs.py"
+  pull_request:
+    paths:
+      - "docs/_shared/**"
+      - "README.md"
+      - "PANORAMA.md"
+      - "scripts/build_docs.py"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Check shared text (pull request)
+        if: github.event_name == 'pull_request'
+        run: python3 scripts/build_docs.py --check
+
+      - name: Rebuild guides and commit (main)
+        if: github.event_name != 'pull_request'
+        run: |
+          python3 scripts/build_docs.py
+          if git diff --quiet; then exit 0; fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898283+github-actions[bot]@users.noreply.github.com"
+          git commit -am "Rebuild README.md and PANORAMA.md from docs/_shared"
+          git push

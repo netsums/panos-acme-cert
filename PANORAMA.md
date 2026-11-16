@@ -95,6 +95,8 @@ sudo -iu "$BOXUSER"
 
 **0c. Install acme.sh**, as `acmesh`, from git, so you can read what you run:
 
+<!-- BEGIN shared/install-acmesh.md: edit docs/_shared/install-acmesh.md instead, this copy is overwritten -->
+
 ```bash
 git clone --depth 1 https://github.com/acmesh-official/acme.sh.git
 cd acme.sh && ./acme.sh --install && cd .. && rm -rf acme.sh
@@ -102,6 +104,8 @@ cd acme.sh && ./acme.sh --install && cd .. && rm -rf acme.sh
 acme.sh --set-default-ca --server letsencrypt
 chmod 700 ~/.acme.sh
 ```
+
+<!-- END shared/install-acmesh.md -->
 
 **0d. Set your names.** Everything below uses these variables, so the blocks
 paste as-is. If you open a new shell later, set `BOXUSER` again, then repeat
@@ -427,11 +431,15 @@ PANOS_TEMPLATE="Web-Template" PANOS_TEMPLATE_STACK="Web-Stack" \
   acme.sh --deploy -d www.example.com --deploy-hook panos --deploy-hook ssh --ecc
 ```
 
+<!-- BEGIN shared/ssl-inbound-hooks.md: edit docs/_shared/ssl-inbound-hooks.md instead, this copy is overwritten -->
+
 Each hook reads its own variables on the first deploy, see the acme.sh
 [deploy hooks wiki](https://github.com/acmesh-official/acme.sh/wiki/deployhooks).
 Bind once: select the cert in the decryption rule (PAN-OS 10.2 and later accept
 several certs per rule). With `--always-force-new-domain-key`, firewall and
 server get the new key together at every renewal.
+
+<!-- END shared/ssl-inbound-hooks.md -->
 
 ## Certificate 3: Mgmt of every firewall
 
@@ -682,6 +690,8 @@ echo | openssl s_client -connect fw01.fw.example.com:443 -servername fw01.fw.exa
 
 GlobalProtect, with the full chain:
 
+<!-- BEGIN shared/full-chain-check.md: edit docs/_shared/full-chain-check.md instead, this copy is overwritten -->
+
 ```bash
 echo | openssl s_client -connect "$CERT:443" -servername "$CERT" 2>/dev/null \
   | grep -E '^ *[0-9]+ s:|^ +i:'
@@ -690,6 +700,8 @@ echo | openssl s_client -connect "$CERT:443" -servername "$CERT" 2>/dev/null \
 `0` is your certificate, `1` the Let's Encrypt intermediate (e.g. `YE2`), and
 there may be a `2`. If you only see `0`, the intermediate is missing and some
 clients will reject the certificate.
+
+<!-- END shared/full-chain-check.md -->
 
 Every cert on the box, when each renews next (`Renew` column), and the cron
 job that does it:
@@ -734,6 +746,8 @@ echo | openssl s_client -connect fw01.fw.example.com:443 -servername fw01.fw.exa
 
 ### Lock the names with CAA
 
+<!-- BEGIN shared/caa-intro.md: edit docs/_shared/caa-intro.md instead, this copy is overwritten -->
+
 A CAA record tells every CA which CA, and which account, may issue for a name.
 With it, a stolen burner token alone is useless: the thief's ACME account isn't
 yours, so Let's Encrypt refuses.
@@ -743,6 +757,8 @@ Get your account URL (production, not staging):
 ```bash
 grep ACCOUNT_URL ~/.acme.sh/ca/acme-v02.api.letsencrypt.org/directory/ca.conf
 ```
+
+<!-- END shared/caa-intro.md -->
 
 In your **real** zone, one record each on `panorama.example.com`,
 `vpn.example.com` and `fw.example.com`, with that URL. The `fw.example.com`
@@ -761,6 +777,8 @@ dig +short CAA "$PANO"
 dig +short CAA "$CERT"
 dig +short CAA fw.example.com
 ```
+
+<!-- BEGIN shared/caa-check-and-test.md: edit docs/_shared/caa-check-and-test.md instead, this copy is overwritten -->
 
 You should see your record, and no `letsencrypt.org` line without `accounturi`.
 If your real zone is on Cloudflare with Universal SSL, Cloudflare can add CAA
@@ -791,12 +809,18 @@ mind the 5 duplicate certs per week.
 - **It covers a leaked token, not a taken-over box.** The box also holds your
   ACME account key. Keep it small and locked down.
 
+<!-- END shared/caa-check-and-test.md -->
+
 ### Shorter certificate lifetimes (47 days by 2029)
+
+<!-- BEGIN shared/lifetimes-intro.md: edit docs/_shared/lifetimes-intro.md instead, this copy is overwritten -->
 
 Public TLS certificates are getting shorter: 200 days maximum since March
 2026, 100 days from March 2027, 47 days from March 2029 (CA/Browser Forum
 ballot SC-081). Let's Encrypt is ahead of that: its default drops from 90 to
 64 days on 10 February 2027, and to 45 days on 16 February 2028.
+
+<!-- END shared/lifetimes-intro.md -->
 
 **You don't need to change anything.** acme.sh asks Let's Encrypt when to
 renew each certificate (ARI) and renews inside that window, so the schedule
@@ -808,6 +832,8 @@ before expiry.
 **Optional: pick the lifetime.** With Let's Encrypt you can't request a number
 of days. You pick a profile by adding it to the `--issue` line:
 
+<!-- BEGIN shared/lifetimes-options.md: edit docs/_shared/lifetimes-options.md instead, this copy is overwritten -->
+
 | Option on `--issue` | Lifetime |
 |---|---|
 | *(none)* | Let's Encrypt default: 90 days, 64 from Feb 2027, 45 from Feb 2028 |
@@ -818,6 +844,8 @@ of days. You pick a profile by adding it to the `--issue` line:
 expires. Let's Encrypt can still ask for an earlier renewal when it needs to
 (for example before revoking certificates). Most people should leave this out:
 the default already renews with plenty of margin.
+
+<!-- END shared/lifetimes-options.md -->
 
 **A new private key on every renewal.** By default acme.sh keeps the same
 private key across renewals, so a leaked key stays usable with the next cert
@@ -901,6 +929,8 @@ Panorama's mgmt cert, and `$PANO` must be a name on that cert (or the mgmt IP,
 if your CA put it on the cert). Managed servers often trust the corporate root
 already. Step 3 tells you: `TRUSTED` means you're set.
 
+<!-- BEGIN shared/internal-ca-trust.md: edit docs/_shared/internal-ca-trust.md instead, this copy is overwritten -->
+
 <details>
 <summary>Box doesn't trust your internal CA yet? (click)</summary>
 
@@ -918,6 +948,8 @@ Don't use acme.sh's `--ca-bundle` instead. It *replaces* the trusted CAs for
 all acme.sh traffic, so talking to Let's Encrypt breaks.
 
 </details>
+
+<!-- END shared/internal-ca-trust.md -->
 
 No internal PKI but don't want a public name for Panorama's mgmt? Use Panorama
 as its own CA: **Panorama > Certificate Management > Certificates >
