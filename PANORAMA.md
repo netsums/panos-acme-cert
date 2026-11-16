@@ -341,15 +341,15 @@ characters). Without it, the object is named after the domain
 name, add e.g. `export PANOS_CERTNAME="gp-le"` under the `PANOS_TEMPLATE` line
 and select that name in the bind.
 
-Both need `export`, or acme.sh doesn't see them. Set them at the top of the
-block and **unset them right after the deploy**. Why the unset matters: the
+Both need `export`, or acme.sh doesn't see them. Set them first, in their own
+block, and **unset them right after the deploy**. Why the unset matters: the
 `panos` hook saves every `PANOS_*` variable it finds set (host, user, key,
 template, template stack, vsys, cert name) into the config of the cert it's
 deploying, and uses those saved values for every renewal. An exported
 `PANOS_TEMPLATE` you forgot to unset is still set when you deploy the next
 cert, so that cert lands in the same template too, and stays configured that
-way for its renewals. The last line of the block checks that only host, user
-and key are left (names only, so the key isn't shown).
+way for its renewals. The last block checks that only host, user and key are
+left (names only, so the key isn't shown).
 
 In your **real** DNS zone:
 
@@ -357,14 +357,21 @@ In your **real** DNS zone:
 _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```
 
+Set the template. Change `GP-Template` to your template's name before you
+press Enter:
+
 ```bash
 export PANOS_TEMPLATE="GP-Template"         # template your GlobalProtect firewalls use
 ```
+
+Issue and deploy:
 
 ```bash
 acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
 acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
 ```
+
+Unset and check:
 
 ```bash
 unset PANOS_TEMPLATE PANOS_CERTNAME
