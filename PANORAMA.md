@@ -105,7 +105,7 @@ chmod 700 ~/.acme.sh
 
 **0d. Set your names.** Everything below uses these variables, so the blocks
 paste as-is. If you open a new shell later, set `BOXUSER` again, then repeat
-0b and this block.
+0b, this block, and the token lines from step 2.
 
 ```bash
 PANO=panorama.example.com     # Panorama's mgmt FQDN: the only thing the box talks to
@@ -167,17 +167,19 @@ zone. An expiry date is optional, but then replace the token before it
 expires, or the next renewal fails. Check the summary, create it, copy it.
 One token covers every certificate below.
 
-Each issue block below starts with:
+Enter both once, here, in the shell you keep open:
 
 ```bash
 read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
 read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 ```
 
-and ends with `unset CF_Token`. `read -s` puts the token in the `CF_Token`
-variable without showing it on screen or saving it in shell history. `export`
-hands it to acme.sh, whose Cloudflare module reads exactly that variable name.
-acme.sh saves the token and zone ID for renewals (see
+`read -s` puts the token in the `CF_Token` variable without showing it on
+screen or saving it in shell history. `export` hands it to acme.sh, whose
+Cloudflare module reads exactly that variable name. Every `--issue` below uses
+it from there, so you don't enter it again. It stays set until the
+[end of step 7](#done-clear-the-shell), like the API key from step 4. acme.sh
+saves the token and zone ID into each cert's config for its renewals (see
 [Where the credentials live](#where-the-credentials-live)), which is why the
 token must only be able to edit the burner zone.
 
@@ -282,8 +284,6 @@ dig +short CNAME "_acme-challenge.$PANO"
 Staging test:
 
 ```bash
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --staging --dns dns_cf -d "$PANO" --always-force-new-domain-key --challenge-alias "$BURNER"
 ```
 
@@ -292,7 +292,6 @@ same shell:
 
 ```bash
 acme.sh --issue --dns dns_cf -d "$PANO" --always-force-new-domain-key --challenge-alias "$BURNER" --force
-unset CF_Token
 acme.sh --list    # CA: LetsEncrypt.org. KeyLength "ec-256" = ECDSA → keep --ecc. "2048" → remove --ecc
 export PANOS_HOST="$PANO" PANOS_USER="$PANOUSER" PANOS_KEY
 acme.sh --deploy -d "$PANO" --deploy-hook panos --ecc "${INSECURE[@]}"
@@ -359,10 +358,7 @@ _acme-challenge.vpn.example.com.  CNAME  _acme-challenge.burner-domain.net.
 ```bash
 export PANOS_TEMPLATE="GP-Template"         # template your GlobalProtect firewalls use
 
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --dns dns_cf -d "$CERT" --always-force-new-domain-key --challenge-alias "$BURNER"
-unset CF_Token
 acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
 
 unset PANOS_TEMPLATE PANOS_CERTNAME
@@ -470,10 +466,7 @@ _acme-challenge.fw.example.com.  CNAME  _acme-challenge.burner-domain.net.
 export PANOS_TEMPLATE="FW-Mgmt-Template"
 export PANOS_CERTNAME="fw-mgmt-wildcard"
 
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --dns dns_cf -d '*.fw.example.com' --always-force-new-domain-key --challenge-alias "$BURNER"
-unset CF_Token
 acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
 
 unset PANOS_TEMPLATE PANOS_CERTNAME
@@ -538,8 +531,6 @@ done 3< ~/firewalls.txt
 Issue and deploy every firewall in the file:
 
 ```bash
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
   [ -n "$FQDN" ] || continue
   [ -n "$TPL" ] || { echo "SKIPPED $FQDN: no template in firewalls.txt"; continue; }
@@ -547,7 +538,7 @@ while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
   acme.sh --issue --dns dns_cf -d "$FQDN" --always-force-new-domain-key --challenge-alias "$BURNER" \
   && acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
 done 3< ~/firewalls.txt
-unset CF_Token PANOS_TEMPLATE PANOS_CERTNAME
+unset PANOS_TEMPLATE PANOS_CERTNAME
 env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
@@ -607,14 +598,11 @@ Check the CNAME, test against staging, then issue the real cert:
 
 ```bash
 dig +short CNAME "_acme-challenge.$FW"
-read -rp 'Cloudflare zone ID (burner zone only): ' CF_Zone_ID; export CF_Zone_ID
-read -rsp 'Cloudflare token (burner zone only): ' CF_Token; echo; export CF_Token
 acme.sh --issue --staging --dns dns_cf -d "$FW" --always-force-new-domain-key --challenge-alias "$BURNER"
 ```
 
 ```bash
 acme.sh --issue --dns dns_cf -d "$FW" --always-force-new-domain-key --challenge-alias "$BURNER" --force
-unset CF_Token
 ```
 
 Check the firewall's mgmt. The reasons it can print are the same as in
@@ -671,6 +659,16 @@ unset FW_KEY
 ```
 
 Repeat this section with the next firewall's name in `FW`.
+
+## Done: clear the shell
+
+After your last certificate (step 6 if you stop there, step 7 otherwise),
+remove the token and the API key from the shell. acme.sh already has its own
+copies for the renewals:
+
+```bash
+unset CF_Token CF_Zone_ID PANOS_KEY
+```
 
 ---
 
