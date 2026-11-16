@@ -51,17 +51,147 @@ push. Their change would go out too.
 
 ## Install
 
-As `acmesh`, copy the two files from [deploy/](deploy/) into
-`~/.acme.sh/deploy/`, read them, then deploy each template cert once with
-the three hooks above (with `PANOS_TEMPLATE` exported as in PANORAMA.md).
-acme.sh saves the hook list and uses it for every renewal.
+You do this once per Panorama, then once per template cert. Prerequisite: the
+cert is already issued and deployed with the plain `panos` hook as in
+[PANORAMA.md](PANORAMA.md) (step 6, 7a or 7b), and bound in its template.
 
-- Leave `PANOS_TEMPLATE_STACK` **unset**, or the `panos` hook pushes one stack
-  on its own, before the check.
-- Role on Panorama, XML API: **Import, Commit, Operational Requests**. No
-  Configuration permission needed.
-- `acme.sh --upgrade` doesn't touch extra files in `~/.acme.sh/deploy/`, but
-  check after upgrades.
+### 1. Add Operational Requests to the role
+
+**Panorama > Admin Roles >** `acme-deploy` **> XML API** → enable
+**Operational Requests** (keep Import and Commit). Commit to Panorama. The
+hooks need it to read the sync status and the push jobs. It also lets a stolen
+key read your config and push, see
+[Operational Requests: think twice](PANORAMA.md#operational-requests-think-twice).
+
+### 2. Put the two hooks on the box
+
+As `acmesh` (`sudo -iu acmesh` from your admin account). This downloads them
+from this repo into acme.sh's deploy folder:
+
+```bash
+cd ~/.acme.sh/deploy
+curl -fsSO https://raw.githubusercontent.com/netsums/panos-acme-cert/main/deploy/panos_check.sh
+curl -fsSO https://raw.githubusercontent.com/netsums/panos-acme-cert/main/deploy/panos_push.sh
+cd
+ls -l ~/.acme.sh/deploy/panos_check.sh ~/.acme.sh/deploy/panos_push.sh
+```
+
+Read them before you use them. They're short:
+
+```bash
+less ~/.acme.sh/deploy/panos_check.sh ~/.acme.sh/deploy/panos_push.sh
+```
+
+### 3. Pick the cert and check its saved config
+
+Set the cert you want to switch over. Change the name before you press
+Enter:
+
+```bash
+C=vpn.example.com             # the cert's name, as in acme.sh --list
+```
+
+Its saved config must have a template and **no** template stack:
+
+```bash
+grep '^SAVED_PANOS_' ~/.acme.sh/"${C}_ecc"/"$C".conf | cut -d= -f1
+```
+
+You should see `SAVED_PANOS_HOST`, `SAVED_PANOS_USER`, `SAVED_PANOS_KEY` and
+`SAVED_PANOS_TEMPLATE`. If `SAVED_PANOS_TEMPLATE_STACK` is there too, remove
+it, or the `panos` hook pushes that one stack on its own before the check:
+
+```bash
+sed -i '/^SAVED_PANOS_TEMPLATE_STACK/d' ~/.acme.sh/"${C}_ecc"/"$C".conf
+```
+
+The shell must not override those saved values. This should print nothing,
+or only `PANOS_HOST` and `PANOS_USER` (from the PANORAMA.md shell, same values):
+
+```bash
+env | grep '^PANOS_' | cut -d= -f1
+```
+
+### 4. Make sure the stacks are in sync
+
+**Panorama > Managed Devices > Summary**, column *Template*: every firewall
+whose stack contains the cert's template must show **In Sync**. If one
+doesn't, push first (or find out why). Otherwise step 5 imports and commits
+but refuses to push, which is the safety stop working, not a bug.
+
+### 5. Deploy once with the three hooks
+
+```bash
+acme.sh --deploy -d "$C" --ecc --deploy-hook panos_check --deploy-hook panos --deploy-hook panos_push
+```
+
+The order matters. It takes a few minutes (it waits for the commit and for
+each push job). What you should see, in this order:
+
+```
+panos_check: stacks with GP-Template: Stack-A Stack-B; not in sync before import: none
+...                                  (the panos hook: import, commit)
+panos_push: pushing 'Stack-A', job 1234
+panos_push: 'Stack-A' pushed OK
+panos_push: pushing 'Stack-B', job 1235
+panos_push: 'Stack-B' pushed OK
+```
+
+`NOT pushed` instead means: the cert is imported and committed, but a stack
+had something else waiting, so nothing was pushed. Push it yourself, fix the
+cause, and run this step again.
+
+### 6. Check it stuck
+
+acme.sh saved the three hooks for this cert, so every renewal uses them:
+
+```bash
+grep '^Le_DeployHook' ~/.acme.sh/"${C}_ecc"/"$C".conf
+```
+
+Expected: `Le_DeployHook='panos_check,panos,panos_push,'`. On Panorama,
+**Task Manager** shows the push jobs with the description
+`acme.sh renewal vpn.example.com`, and **Managed Devices** shows every stack
+`In Sync`. On a firewall, the cert is there:
+
+```bash
+echo | openssl s_client -connect vpn.example.com:443 -servername vpn.example.com 2>/dev/null \
+  | openssl x509 -noout -subject -issuer -enddate
+```
+
+Optional, the real renewal path (lab test 8). It issues a new cert, so it
+counts against Let's Encrypt's limits; don't repeat it many times:
+
+```bash
+acme.sh --renew -d "$C" --ecc --force
+```
+
+### 7. The other template certs
+
+Repeat steps 3 to 6 for each, e.g. `C='*.fw.example.com'` for the wildcard
+(7a). For one cert per firewall (7b), steps 4 and 5 for all of them, from the
+same `~/firewalls.txt`:
+
+```bash
+while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
+  [ -n "$FQDN" ] || continue
+  acme.sh --deploy -d "$FQDN" --ecc --deploy-hook panos_check --deploy-hook panos --deploy-hook panos_push
+done 3< ~/firewalls.txt
+```
+
+Panorama's own mgmt cert (step 5 of PANORAMA.md) has no template and nothing
+to push: leave it on the plain `panos` hook.
+
+### Back to "you push"
+
+Deploy once with the plain hook. acme.sh replaces the saved hook list:
+
+```bash
+acme.sh --deploy -d "$C" --ecc --deploy-hook panos
+```
+
+`acme.sh --upgrade` doesn't touch extra files in `~/.acme.sh/deploy/`, but
+check after upgrades that both files are still there.
 
 ## Lab tests before release
 
