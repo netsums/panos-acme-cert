@@ -375,7 +375,7 @@ Unset and check:
 
 ```bash
 unset PANOS_TEMPLATE PANOS_CERTNAME
-env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
+env | grep '^PANOS_' | cut -d= -f1          # should only show PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 **Commit and push.** The hook always commits to Panorama after the import,
@@ -485,7 +485,7 @@ acme.sh --issue --dns dns_cf -d '*.fw.example.com' --always-force-new-domain-key
 acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
 
 unset PANOS_TEMPLATE PANOS_CERTNAME
-env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
+env | grep '^PANOS_' | cut -d= -f1          # should only show PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 `PANOS_CERTNAME` gives the object a readable name. Without it, the hook
@@ -556,7 +556,7 @@ while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
   && acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
 done 3< ~/firewalls.txt
 unset PANOS_TEMPLATE PANOS_CERTNAME
-env | grep '^PANOS_' | cut -d= -f1          # only PANOS_HOST, PANOS_USER, PANOS_KEY
+env | grep '^PANOS_' | cut -d= -f1          # should only show PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 Each pass of the loop sets the template from the file and the object name from
