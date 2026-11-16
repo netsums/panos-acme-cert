@@ -348,10 +348,8 @@ template, template stack, vsys, cert name) into the config of the cert it's
 deploying, and uses those saved values for every renewal. An exported
 `PANOS_TEMPLATE` you forgot to unset is still set when you deploy the next
 cert, so that cert lands in the same template too, and stays configured that
-way for its renewals. The last block removes every `PANOS_*` variable except
-host, user and key, so it also catches one you set yourself (e.g.
-`PANOS_TEMPLATE_STACK`), then lists what's left (names only, so the key isn't
-shown).
+way for its renewals. The last block checks that only host, user and key are
+left (names only, so the key isn't shown).
 
 In your **real** DNS zone:
 
@@ -376,9 +374,8 @@ acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc
 Unset and check:
 
 ```bash
-# remove every PANOS_* variable except PANOS_HOST, PANOS_USER and PANOS_KEY
-unset $(compgen -v PANOS_ | grep -vxE 'PANOS_(HOST|USER|KEY)')
-compgen -v PANOS_                           # should list only PANOS_HOST, PANOS_KEY, PANOS_USER
+unset PANOS_TEMPLATE PANOS_CERTNAME
+env | grep '^PANOS_' | cut -d= -f1          # should only show PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 **Commit and push.** The hook always commits to Panorama after the import,
@@ -487,9 +484,8 @@ export PANOS_CERTNAME="fw-mgmt-wildcard"
 acme.sh --issue --dns dns_cf -d '*.fw.example.com' --always-force-new-domain-key --challenge-alias "$BURNER"
 acme.sh --deploy -d '*.fw.example.com' --deploy-hook panos --ecc
 
-# remove every PANOS_* variable except PANOS_HOST, PANOS_USER and PANOS_KEY
-unset $(compgen -v PANOS_ | grep -vxE 'PANOS_(HOST|USER|KEY)')
-compgen -v PANOS_                           # should list only PANOS_HOST, PANOS_KEY, PANOS_USER
+unset PANOS_TEMPLATE PANOS_CERTNAME
+env | grep '^PANOS_' | cut -d= -f1          # should only show PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 `PANOS_CERTNAME` gives the object a readable name. Without it, the hook
@@ -559,9 +555,8 @@ while IFS=$' \t\r' read -r FQDN TPL <&3 || [ -n "$FQDN" ]; do
   acme.sh --issue --dns dns_cf -d "$FQDN" --always-force-new-domain-key --challenge-alias "$BURNER" \
   && acme.sh --deploy -d "$FQDN" --deploy-hook panos --ecc
 done 3< ~/firewalls.txt
-# remove every PANOS_* variable except PANOS_HOST, PANOS_USER and PANOS_KEY
-unset $(compgen -v PANOS_ | grep -vxE 'PANOS_(HOST|USER|KEY)')
-compgen -v PANOS_                           # should list only PANOS_HOST, PANOS_KEY, PANOS_USER
+unset PANOS_TEMPLATE PANOS_CERTNAME
+env | grep '^PANOS_' | cut -d= -f1          # should only show PANOS_HOST, PANOS_USER, PANOS_KEY
 ```
 
 Each pass of the loop sets the template from the file and the object name from
