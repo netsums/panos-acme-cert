@@ -12,6 +12,8 @@ portal/gateway, mgmt, Authentication Portal, SSL Inbound Inspection, see
 - **Your production DNS credentials never touch the box.** Validation goes
   through a delegated throwaway domain.
 
+> **Use at your own risk.** No warranty, no liability. See the [disclaimer](#disclaimer).
+
 **Why a separate box?** Up to PAN-OS 12.2, neither the firewall nor Panorama
 has a built-in ACME client, so they can't get or renew a public certificate
 on their own. PAN-OS auto-enrollment (SCEP) only works with an internal CA. So
@@ -590,6 +592,16 @@ not just the one for `$CERT`.
 | Issue fails with a CAA error | CAA `accounturi` doesn't match: staging account, or a different acme.sh install |
 | `Domains not changed` … `Skipping` after the staging test | The real run needs `--force` (step 3). `acme.sh --list` shows `LetsEncrypt.org_test` in the CA column while it's still the staging cert |
 | Browser says the cert isn't trusted, issuer mentions "STAGING" | A staging cert was deployed. Issue the real one with `--force` (step 3), then deploy again |
+
+## Disclaimer
+
+This guide and everything in this repository are provided **as is**, without
+warranty of any kind, under the MIT License. You use them at your own risk. I
+accept no liability for certificates that don't renew, expired certificates,
+outages or any other damage, including damage caused by changes in acme.sh,
+Let's Encrypt, PAN-OS or anything else outside my control. Test in a lab
+first, and **monitor your certificates' expiry dates yourself**: automation
+can fail without anyone noticing.
 
 ## License
 
