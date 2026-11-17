@@ -381,7 +381,6 @@ Continue only if it says `API key OK`.
 **5b. First deploy**, in the same shell:
 
 ```bash
-acme.sh --list    # KeyLength "ec-256" = ECDSA → keep --ecc. "2048" → remove --ecc
 export PANOS_HOST="$FW" PANOS_USER="$FWUSER" PANOS_KEY
 acme.sh --deploy -d "$CERT" --deploy-hook panos --ecc "${INSECURE[@]}"
 unset PANOS_KEY
