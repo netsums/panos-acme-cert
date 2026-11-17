@@ -6,7 +6,8 @@ portal/gateway, mgmt, Authentication Portal, SSL Inbound Inspection, see
 [acme.sh](https://github.com/acmesh-official/acme.sh).
 
 - **No script from this repo to trust.** Every step is a command you can read
-  and paste. The firewall deploy is acme.sh's own upstream `panos` hook.
+  and paste. The firewall deploy is acme.sh's own upstream `panos` deploy hook
+  (a small script acme.sh runs after every renewal to install the cert).
 - **No password stored.** The firewall only ever sees an API key from an
   admin that can do nothing but Import and Commit.
 - **Your production DNS credentials never touch the box.** Validation goes
