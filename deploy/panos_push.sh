@@ -82,7 +82,8 @@ panos_push_deploy() {
     if _panos_push_wait_job "$_pp_job"; then
       _info "panos_push: '$_pp_stack' pushed OK"
     else
-      _err "panos_push: push of '$_pp_stack' failed (job $_pp_job): $_pp_job_xml"
+      _err "panos_push: push of '$_pp_stack' failed (job $_pp_job):"
+      _panos_push_explain "$_pp_job_xml"
       _pp_failed="$_pp_failed $_pp_stack"
     fi
   done
@@ -102,6 +103,49 @@ _panos_push_api() {
 # Run an XPath query on an XML answer: _panos_push_xpath "<xml>" "<xpath>"
 _panos_push_xpath() {
   printf '%s' "$1" | xmllint --xpath "$2" - 2>/dev/null
+}
+
+# Log why a push job failed: Panorama's own <details> lines (job level, then
+# per firewall), plus a hint for errors we know. Raw XML only if none found.
+_panos_push_explain() {
+  _pp_lines="$(_panos_push_lines "$1" '//job/details//line')"
+  _pp_n="$(_panos_push_xpath "$1" 'count(//devices/entry[result = "FAIL"])')"
+  _pp_d=1
+  while [ "$_pp_d" -le "${_pp_n:-0}" ]; do
+    _pp_dev="(//devices/entry[result = \"FAIL\"])[$_pp_d]"
+    _pp_name="$(_panos_push_xpath "$1" "string($_pp_dev/devicename)")"
+    [ -n "$_pp_name" ] || _pp_name="$(_panos_push_xpath "$1" "string($_pp_dev/serial-no)")"
+    _pp_dlines="$(_panos_push_lines "$1" "$_pp_dev/details//line")"
+    [ -n "$_pp_dlines" ] || _pp_dlines="push failed"
+    _pp_lines="$_pp_lines
+$(printf '%s\n' "$_pp_dlines" | sed "s|^|$_pp_name: |")"
+    _pp_d=$((_pp_d + 1))
+  done
+  _pp_lines="$(printf '%s\n' "$_pp_lines" | sed '/^$/d')"
+
+  if [ -z "$_pp_lines" ]; then
+    _err "panos_push:   $1"
+    return
+  fi
+  printf '%s\n' "$_pp_lines" | while IFS= read -r _pp_line; do
+    _err "panos_push:   $_pp_line"
+  done
+  case "$_pp_lines" in
+    *"no connected device"*)
+      _err "panos_push: hint: no firewall in '$_pp_stack' is connected to Panorama. Check Panorama > Managed Devices > Summary, then push the stack yourself." ;;
+  esac
+}
+
+# Print each non-empty node matching an XPath as one trimmed line:
+# _panos_push_lines "<xml>" "<xpath>"
+_panos_push_lines() {
+  _pp_c="$(_panos_push_xpath "$1" "count($2)")"
+  _pp_k=1
+  while [ "$_pp_k" -le "${_pp_c:-0}" ]; do
+    _panos_push_xpath "$1" "normalize-space(($2)[$_pp_k])"
+    echo
+    _pp_k=$((_pp_k + 1))
+  done | sed '/^$/d'
 }
 
 # Wait until no commit-type job is pending or active
