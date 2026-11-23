@@ -133,6 +133,8 @@ $(printf '%s\n' "$_pp_dlines" | sed "s|^|$_pp_name: |")"
   case "$_pp_lines" in
     *"no connected device"*)
       _err "panos_push: hint: no firewall in '$_pp_stack' is connected to Panorama. Check Panorama > Managed Devices > Summary, then push the stack yourself." ;;
+    *"out of the config-audit range"*|*"Perform a full push"*)
+      _err "panos_push: hint: Panorama may need one full push of '$_pp_stack'. Push it yourself, then selective pushes work again." ;;
   esac
 }
 
