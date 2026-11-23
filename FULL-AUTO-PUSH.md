@@ -56,6 +56,10 @@ hooks need it to read the sync status and the push jobs. It also lets a stolen
 key read your config and push, see
 [Operational Requests: think twice](PANORAMA.md#operational-requests-think-twice).
 
+Without it, the renewal log shows `panos_check: could not read the template
+stack status, panos_push will not push.` followed by Panorama's own error. The
+panos hook still imports and commits the cert, only the push is skipped.
+
 ## Step 2: Download the two hooks
 
 The hooks read Panorama's XML answers with `xmllint`, the standard XML tool

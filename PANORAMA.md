@@ -878,6 +878,8 @@ it to mgmt, and trust Panorama's CA cert on the box as above.
 | Verified deploy after the bind fails with a TLS error | Panorama isn't presenting the new cert yet, or the name isn't on it: check the bind and commit |
 | Cert landed in a template instead of on Panorama itself (or the other way round) | A `PANOS_TEMPLATE` from an earlier `export` was saved into this cert's config. Remove the line: `sed -i '/^SAVED_PANOS_TEMPLATE/d' ~/.acme.sh/<domain>_ecc/<domain>.conf`, then deploy again |
 | Deploy to Panorama fails on the object name | Name longer than 31 characters (wildcards become `WILDCARD_.<domain>`). Set a shorter `PANOS_CERTNAME` |
+| Full-auto push: `panos_check: could not read the template stack status` | Role missing **Operational Requests** (the next log line shows Panorama's own error). Enable it, commit on Panorama, rerun. See [FULL-AUTO-PUSH.md Step 1](FULL-AUTO-PUSH.md#step-1-add-operational-requests-to-the-role) |
+| Full-auto push: `panos_push: … There is no connected device to perform selective push.` | No firewall in that template stack is connected to Panorama. Check **Panorama > Managed Devices > Summary**, then push the stack yourself. The cert is imported and committed on Panorama already |
 | Cert is in the template, firewalls don't have it | Not pushed yet. Push the template stack, or use the [full-auto push](FULL-AUTO-PUSH.md) |
 | Users still see the old cert | Not pushed yet, or the SSL/TLS Service Profile in the template points at a different cert object |
 | 4b: only the first firewall gets a cert | A command in the loop read from stdin. Use the loop as shown, with `3<` and `<&3` |

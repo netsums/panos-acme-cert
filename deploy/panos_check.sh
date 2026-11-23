@@ -52,8 +52,13 @@ panos_check_deploy() {
   _pc_resp="$(_post "type=op&cmd=$_pc_cmd&key=$_pc_key" "https://$PANOS_HOST/api/" "" "POST")"
 
   if [ "$(_panos_check_xpath 'string(/response/@status)')" != "success" ]; then
+    _pc_msg="$(_panos_check_xpath 'string((//msg)[1])' | tr -s ' \t\r\n' ' ' | sed 's/^ //;s/ $//')"
     _savedeployconf PANOS_PUSH_STATE "error:could not read the template stack status" 1
     _err "panos_check: could not read the template stack status, panos_push will not push."
+    [ -n "$_pc_msg" ] && _err "panos_check: Panorama said: $_pc_msg"
+    _getdeployconf PANOS_USER
+    _err "panos_check: most likely cause: the admin role of the API user${PANOS_USER:+ ($PANOS_USER)} is missing XML API > Operational Requests. Enable it, commit on Panorama and rerun (FULL-AUTO-PUSH.md Step 1)."
+    _err "panos_check: the panos hook still imports and commits the cert, only the push is skipped."
     return 0
   fi
 
@@ -62,7 +67,7 @@ panos_check_deploy() {
   # are those of them where any firewall's <template-status> is not "In Sync".
   _pc_mine="//template-stack/entry[templates/member = '$PANOS_TEMPLATE']"
   _pc_stacks="$(_panos_check_names "$_pc_mine")"
-  _pc_dirty="$(_panos_check_names "$_pc_mine[.//template-status != 'In Sync']")"
+  _pc_dirty="$(_panos_check_names "${_pc_mine}[.//template-status != 'In Sync']")"
 
   if [ -z "$_pc_stacks" ]; then
     _savedeployconf PANOS_PUSH_STATE "error:no template stack contains $PANOS_TEMPLATE" 1
