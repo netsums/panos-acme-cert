@@ -26,7 +26,7 @@ through its API.
 ## Watch the videos
 
 - **Video 1: one firewall** (scenarios 1 and 2): https://youtu.be/UmRaHxGueyY
-- **Video 2: Panorama and many firewalls** (scenarios 3 and 4): Video will be available soon!
+- **Video 2: Panorama and many firewalls** (scenarios 3 and 4): https://youtu.be/_JJdzwD1Vnc
   The guide for it is [PANORAMA.md](PANORAMA.md).
 
 ---
