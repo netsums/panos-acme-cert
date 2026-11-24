@@ -4,7 +4,7 @@ Free, auto-renewing Let's Encrypt certificates for Panorama's own mgmt,
 GlobalProtect (into a template) and the mgmt of every managed firewall, from
 one Linux box, using [acme.sh](https://github.com/acmesh-official/acme.sh).
 
-- **Video 2: Panorama and many firewalls:** Video will be available soon!
+- **Video 2: Panorama and many firewalls:** (https://youtu.be/_JJdzwD1Vnc)
 - **Single firewall, no Panorama?** Follow the
   [README](README.md) and [video 1](https://youtu.be/UmRaHxGueyY) instead.
 
